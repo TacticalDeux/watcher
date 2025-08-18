@@ -1,0 +1,47 @@
+[
+  {
+    "id": "SummonerBarrier",
+    "key": 21,
+    "name": "Barrier"
+  },
+  {
+    "id": "SummonerBoost",
+    "key": 1,
+    "name": "Cleanse"
+  },
+  {
+    "id": "SummonerDot",
+    "key": 14,
+    "name": "Ignite"
+  },
+  {
+    "id": "SummonerExhaust",
+    "key": 3,
+    "name": "Exhaust"
+  },
+  {
+    "id": "SummonerFlash",
+    "key": 4,
+    "name": "Flash"
+  },
+  {
+    "id": "SummonerHaste",
+    "key": 6,
+    "name": "Ghost"
+  },
+  {
+    "id": "SummonerHeal",
+    "key": 7,
+    "name": "Heal"
+  },
+  {
+    "id": "SummonerSmite",
+    "key": 11,
+    "name": "Smite"
+  },
+  {
+    "id": "SummonerTeleport",
+    "key": 12,
+    "name": "Teleport"
+  }
+]
