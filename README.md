@@ -4,7 +4,7 @@ Watcher is a modern rewrite and updated version of my previous application, "cir
 
 ### Installation/Building
 
-You can download the windows installer from the [releases page](https://github.com/TacticalDeuce/watcher/releases)
+You can download the windows installer from the [releases page](https://github.com/TacticalDeux/watcher/releases)
 
 To build this project you'll need to have Node.js and Rust installed on your system.
 
