@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "watcher",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "identifier": "com.tacticaldeux.watcher",
   "build": {
     "frontendDist": "../src"
@@ -10,6 +10,11 @@
     "withGlobalTauri": true,
     "security": {
       "csp": null
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
     }
   },
   "bundle": {
@@ -25,10 +30,7 @@
       "icons/32x32.png",
       "icons/16x16.png"
     ],
-    "resources": [
-      "icons/**/*",
-      "utils/**/*"
-    ],
+    "resources": ["icons/**/*", "utils/**/*"],
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico"

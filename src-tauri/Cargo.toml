@@ -1,6 +1,6 @@
 [package]
 name = "watcher"
-version = "3.0.0"
+version = "3.0.1"
 description = "A League of Legends Champion Select Automation Tool"
 authors = ["TacticalDeux <tacticaldeux1@gmail.com>"]
 license = "MIT"
@@ -28,8 +28,15 @@ hyper-util = { version = "0.1", optional = true }
 hyper-rustls = { version = "0.27", optional = true }
 http-body-util = { version = "0.1", optional = true }
 bytes = { version = "1.0", optional = true }
+tauri-plugin-shell = "2"
 
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
-advanced-http = ["hyper", "hyper-util", "hyper-rustls", "http-body-util", "bytes"]
+advanced-http = [
+    "hyper",
+    "hyper-util",
+    "hyper-rustls",
+    "http-body-util",
+    "bytes",
+]

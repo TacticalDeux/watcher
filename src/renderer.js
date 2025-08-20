@@ -1,907 +1,1135 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const elements = Object.freeze({
-        fileMenuButton: document.getElementById('file-menu-button'),
-        fileDropdownContent: document.getElementById('file-dropdown-content'),
-        hideAppButton: document.getElementById('hide-app-button'),
-        clearPicksBansButton: document.getElementById('clear-picks-bans'),
-        settingsSection: document.getElementById('settings-section'),
-        pickTextInput: document.getElementById('pick-text-input'),
-        banTextInput: document.getElementById('ban-text-input'),
-        pickBanStatus: document.getElementById('pick-ban-status'),
-        connectionStatus: document.getElementById('connection-status'),
-        gameflowStatus: document.getElementById('gameflow-status'),
-        assignedRole: document.getElementById('assigned-role'),
-        pickNotFoundLabel: document.getElementById('pick-not-found-label'),
-        banNotFoundLabel: document.getElementById('ban-not-found-label'),
-        spellWarningLabel: document.getElementById('spell-warning-label'),
-        themeToggleButton: document.getElementById('theme-toggle'),
-        themeIcon: document.getElementById('theme-icon'),
-        updateButton: document.getElementById('update-button'),
-        settingsSummary: document.getElementById('settings-summary'),
-        pickBanSection: document.getElementById('pick-ban-section'),
-        pickSuggestions: document.getElementById('pick-suggestions'),
-        banSuggestions: document.getElementById('ban-suggestions'),
-        currentPicks: document.getElementById('current-picks'),
-        currentBans: document.getElementById('current-bans'),
-        spell1Dropdown: document.getElementById('spell1-dropdown'),
-        spell2Dropdown: document.getElementById('spell2-dropdown'),
-        spell1Image: document.getElementById('spell1-image'),
-        spell2Image: document.getElementById('spell2-image'),
+document.addEventListener("DOMContentLoaded", () => {
+  const elements = Object.freeze({
+    fileMenuButton: document.getElementById("file-menu-button"),
+    fileDropdownContent: document.getElementById("file-dropdown-content"),
+    hideAppButton: document.getElementById("hide-app-button"),
+    clearPicksBansButton: document.getElementById("clear-picks-bans"),
+    settingsSection: document.getElementById("settings-section"),
+    pickTextInput: document.getElementById("pick-text-input"),
+    banTextInput: document.getElementById("ban-text-input"),
+    pickBanStatus: document.getElementById("pick-ban-status"),
+    connectionStatus: document.getElementById("connection-status"),
+    gameflowStatus: document.getElementById("gameflow-status"),
+    assignedRole: document.getElementById("assigned-role"),
+    pickNotFoundLabel: document.getElementById("pick-not-found-label"),
+    banNotFoundLabel: document.getElementById("ban-not-found-label"),
+    spellWarningLabel: document.getElementById("spell-warning-label"),
+    themeToggleButton: document.getElementById("theme-toggle"),
+    themeIcon: document.getElementById("theme-icon"),
+    updateButton: document.getElementById("update-button"),
+    settingsSummary: document.getElementById("settings-summary"),
+    pickBanSection: document.getElementById("pick-ban-section"),
+    pickSuggestions: document.getElementById("pick-suggestions"),
+    banSuggestions: document.getElementById("ban-suggestions"),
+    currentPicks: document.getElementById("current-picks"),
+    currentBans: document.getElementById("current-bans"),
+    spell1Dropdown: document.getElementById("spell1-dropdown"),
+    spell2Dropdown: document.getElementById("spell2-dropdown"),
+    spell1Image: document.getElementById("spell1-image"),
+    spell2Image: document.getElementById("spell2-image"),
+  });
 
+  elements.updateButton.classList.add("hidden");
+
+  let champions = [];
+  let summonerSpells = [];
+  let selectedSpell1 = null;
+  let selectedSpell2 = null;
+  let championPicks = [];
+  let banPick = null;
+
+  // Pre-allocated arrays for better memory performance
+  let currentPickSuggestions = new Array(8);
+  let currentBanSuggestions = new Array(8);
+  let pickSuggestionsCount = 0;
+  let banSuggestionsCount = 0;
+  let pickHighlightedIndex = -1;
+  let banHighlightedIndex = -1;
+  let lastIsLeagueRunning = false;
+  let currentConnectionStatus = "Starting...";
+  let currentGameflowStatus = "Waiting for League Client...";
+
+  // Cache for normalized champion names (performance optimization for search)
+  let normalizedChampionCache = new Map();
+
+  function debounce(func, delay) {
+    let timeoutId;
+    let lastArgs;
+    let lastThis;
+
+    const debounced = function (...args) {
+      lastArgs = args;
+      lastThis = this;
+
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+
+      timeoutId = setTimeout(() => {
+        timeoutId = undefined;
+        func.apply(lastThis, lastArgs);
+      }, delay);
+    };
+
+    debounced.cancel = () => {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+        timeoutId = undefined;
+      }
+    };
+
+    return debounced;
+  }
+
+  function throttle(func, limit) {
+    let inThrottle;
+    return function (...args) {
+      if (!inThrottle) {
+        func.apply(this, args);
+        inThrottle = true;
+        setTimeout(() => (inThrottle = false), limit);
+      }
+    };
+  }
+
+  const settingsChangeHandler = (event) => {
+    const target = event.target;
+    if (target.type === "checkbox" && target.dataset.setting) {
+      // Batch DOM updates
+      requestAnimationFrame(() => {
+        window.tauriAPI.send("update_checkbox", {
+          id: target.dataset.setting,
+          checked: target.checked,
+        });
+
+        if (target.dataset.setting === "spell-selection") {
+          updateSpellWarning();
+        }
+        if (target.dataset.setting === "pick-ban-selection") {
+          elements.pickBanSection.style.display = target.checked
+            ? "block"
+            : "none";
+        }
+        updateSettingsSummary();
+
+        const currentSettings = {
+          autoAccept: document.getElementById("auto-accept-checkbox").checked,
+          pickBanSelection: document.getElementById(
+            "pick-ban-selection-checkbox",
+          ).checked,
+          spellSelection: document.getElementById("spell-selection-checkbox")
+            .checked,
+        };
+
+        window.tauriAPI.updateTrayTooltip(
+          currentConnectionStatus,
+          currentGameflowStatus,
+          currentSettings,
+        );
+      });
+    }
+  };
+
+  elements.settingsSection.addEventListener("change", settingsChangeHandler, {
+    passive: true,
+  });
+
+  const debouncedPickInput = debounce((value) => {
+    window.tauriAPI.send("update_pick_ban_text", { type: "pick", text: value });
+  }, 300);
+
+  const debouncedBanInput = debounce((value) => {
+    window.tauriAPI.send("update_pick_ban_text", { type: "ban", text: value });
+  }, 300);
+
+  const throttledShowPickSuggestions = throttle(showPickSuggestions, 100);
+  const throttledShowBanSuggestions = throttle(showBanSuggestions, 100);
+
+  const pickInputHandler = (event) => {
+    const value = event.target.value;
+    debouncedPickInput(value);
+    throttledShowPickSuggestions(value);
+  };
+
+  const banInputHandler = (event) => {
+    const value = event.target.value;
+    debouncedBanInput(value);
+    throttledShowBanSuggestions(value);
+  };
+
+  elements.pickTextInput.addEventListener("input", pickInputHandler, {
+    passive: true,
+  });
+  elements.banTextInput.addEventListener("input", banInputHandler, {
+    passive: true,
+  });
+
+  function buildNormalizedChampionCache() {
+    normalizedChampionCache.clear();
+    for (let i = 0; i < champions.length; i++) {
+      const champion = champions[i];
+      const normalized = champion.name.toLowerCase().replace(/[ ']/g, "");
+      normalizedChampionCache.set(champion.id, normalized);
+    }
+  }
+
+  function updateSettingsSummary() {
+    const checkboxes = elements.settingsSection.querySelectorAll(
+      'input[type="checkbox"][data-setting]',
+    );
+    const activeSettings = [];
+
+    for (let i = 0; i < checkboxes.length; i++) {
+      const checkbox = checkboxes[i];
+      if (checkbox.checked) {
+        const label = document.querySelector(`label[for="${checkbox.id}"]`);
+        if (label) {
+          // Map UI labels to main process expected strings
+          const settingName =
+            checkbox.id === "auto-accept-checkbox"
+              ? "Auto-Accept"
+              : label.textContent;
+          activeSettings.push(settingName);
+        }
+      }
+    }
+
+    elements.settingsSummary.textContent =
+      activeSettings.length > 0
+        ? `On: ${activeSettings.join(", ")}`
+        : "All Off";
+  }
+
+  function setupCollapsibleSections() {
+    const sectionHeaders = document.querySelectorAll(".section-header");
+    const clickHandler = (event) => {
+      const header = event.currentTarget;
+      const section = header.parentElement;
+      const sectionId = section.id;
+
+      section.classList.toggle("collapsed");
+      const isCollapsed = section.classList.contains("collapsed");
+      localStorage.setItem(`${sectionId}-collapsed`, isCollapsed);
+    };
+
+    for (let i = 0; i < sectionHeaders.length; i++) {
+      const header = sectionHeaders[i];
+      const section = header.parentElement;
+      const sectionId = section.id;
+
+      if (localStorage.getItem(`${sectionId}-collapsed`) === "true") {
+        section.classList.add("collapsed");
+      }
+
+      header.addEventListener("click", clickHandler, { passive: true });
+    }
+  }
+
+  function setupThemeToggle() {
+    const currentTheme = localStorage.getItem("theme") || "light-theme";
+    document.body.classList.add(currentTheme);
+    updateThemeIcon(currentTheme);
+
+    const themeToggleHandler = () => {
+      const isDark = document.body.classList.contains("dark-theme");
+      const newTheme = isDark ? "light-theme" : "dark-theme";
+
+      // Batch DOM updates
+      requestAnimationFrame(() => {
+        document.body.classList.remove("light-theme", "dark-theme");
+        document.body.classList.add(newTheme);
+        localStorage.setItem("theme", newTheme);
+        updateThemeIcon(newTheme);
+      });
+    };
+
+    elements.themeToggleButton.addEventListener("click", themeToggleHandler, {
+      passive: true,
+    });
+  }
+
+  function updateThemeIcon(theme) {
+    const isDark = theme === "dark-theme";
+    elements.themeIcon.classList.toggle("fa-moon", isDark);
+    elements.themeIcon.classList.toggle("fa-sun", !isDark);
+  }
+
+  async function setupIPCListeners() {
+    // Wait for tauriAPI to be available and ready
+    while (!window.tauriAPI || !window.tauriAPI.ready) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    window.tauriAPI.on("status-update", (data) => {
+      // Batch DOM updates
+      requestAnimationFrame(() => {
+        updateConnectionStatus(data);
+        if (data.gameflowStatus !== undefined) {
+          currentGameflowStatus = data.gameflowStatus;
+          elements.gameflowStatus.textContent = data.gameflowStatus;
+        }
+        if (data.assignedRole !== undefined) {
+          updateAssignedRole(data.assignedRole);
+        }
+
+        // Update checkbox states based on main process settings
+        if (data.settings) {
+          document.getElementById("auto-accept-checkbox").checked =
+            data.settings.autoAccept;
+          document.getElementById("pick-ban-selection-checkbox").checked =
+            data.settings.pickBanSelection;
+          document.getElementById("spell-selection-checkbox").checked =
+            data.settings.spellSelection;
+
+          // Ensure pick/ban section visibility is correct on update
+          elements.pickBanSection.style.display = data.settings.pickBanSelection
+            ? "block"
+            : "none";
+          updateSpellWarning();
+        }
+        updateSettingsSummary();
+      });
+    });
+  }
+
+  async function fetchAndInitializeData() {
+    try {
+      const initialData = await window.tauriAPI.getChampionsAndSpells();
+      console.log("Fetched initial data:", initialData);
+      champions = initialData.champions || [];
+      summonerSpells = initialData.summonerSpells || [];
+      console.log("Champions loaded:", champions.length);
+      console.log("Spells loaded:", summonerSpells.length);
+      buildNormalizedChampionCache();
+      populateSpellSelection();
+
+      const gameState = await window.tauriAPI.getCurrentGameState();
+      console.log("Fetched game state:", gameState);
+      updateConnectionStatus(gameState);
+      if (gameState.gameflowStatus !== undefined) {
+        currentGameflowStatus = gameState.gameflowStatus;
+        elements.gameflowStatus.textContent = gameState.gameflowStatus;
+      }
+      if (gameState.assignedRole !== undefined) {
+        updateAssignedRole(gameState.assignedRole);
+      }
+      if (gameState.settings) {
+        document.getElementById("auto-accept-checkbox").checked =
+          gameState.settings.autoAccept;
+        document.getElementById("pick-ban-selection-checkbox").checked =
+          gameState.settings.pickBanSelection;
+        document.getElementById("spell-selection-checkbox").checked =
+          gameState.settings.spellSelection;
+        elements.pickBanSection.style.display = gameState.settings
+          .pickBanSelection
+          ? "block"
+          : "none";
+        updateSpellWarning();
+      }
+      updateSettingsSummary();
+
+      // Update tray tooltip with initial game state and settings - FIXED
+      if (
+        gameState.connectionStatus &&
+        gameState.gameflowStatus &&
+        gameState.settings
+      ) {
+        window.tauriAPI.updateTrayTooltip(
+          gameState.connectionStatus,
+          gameState.gameflowStatus,
+          gameState.settings,
+        );
+      }
+    } catch (error) {
+      console.error("Failed to fetch initial data or game state:", error);
+    }
+  }
+
+  function updateConnectionStatus(data) {
+    if (data.isLeagueRunning !== undefined) {
+      lastIsLeagueRunning = data.isLeagueRunning;
+    }
+
+    if (data.connectionStatus !== undefined) {
+      currentConnectionStatus = data.connectionStatus;
+      const statusText = lastIsLeagueRunning
+        ? `✅ ${currentConnectionStatus || "League Client Running"}`
+        : `❌ ${currentConnectionStatus || "League Client not running"}`;
+      elements.connectionStatus.textContent = statusText;
+    }
+
+    elements.connectionStatus.className = lastIsLeagueRunning
+      ? "status-connected"
+      : "status-disconnected";
+  }
+
+  function updateAssignedRole(role) {
+    if (role) {
+      elements.assignedRole.textContent = `Role: ${role}`;
+      elements.assignedRole.style.display = "block";
+    } else {
+      elements.assignedRole.style.display = "none";
+    }
+  }
+
+  function setupButtonHandlers() {
+    const clearHandler = () => {
+      // Batch all updates
+      championPicks.length = 0;
+      banPick = null;
+      elements.pickTextInput.value = "";
+      elements.banTextInput.value = "";
+
+      requestAnimationFrame(() => {
+        updatePickBanDisplay();
+        window.tauriAPI.send("clear_picks_bans");
+        showTemporaryLabel(
+          elements.pickBanStatus,
+          "Picks and bans cleared.",
+          3000,
+        );
+      });
+    };
+
+    elements.clearPicksBansButton.addEventListener("click", clearHandler, {
+      passive: true,
     });
 
-    elements.updateButton.classList.add('hidden');
+    elements.fileMenuButton.addEventListener(
+      "click",
+      (event) => {
+        event.stopPropagation();
+        elements.fileDropdownContent.classList.toggle("show");
+      },
+      { passive: true },
+    );
 
-    let champions = [];
-    let summonerSpells = [];
-    let selectedSpell1 = null;
-    let selectedSpell2 = null;
-    let championPicks = [];
-    let banPick = null;
+    elements.hideAppButton.addEventListener(
+      "click",
+      () => {
+        window.tauriAPI.send("hide_app");
+        elements.fileDropdownContent.classList.remove("show");
+      },
+      { passive: true },
+    );
 
-    // Pre-allocated arrays for better memory performance
-    let currentPickSuggestions = new Array(8);
-    let currentBanSuggestions = new Array(8);
-    let pickSuggestionsCount = 0;
-    let banSuggestionsCount = 0;
-    let pickHighlightedIndex = -1;
-    let banHighlightedIndex = -1;
-    let lastIsLeagueRunning = false;
-    let currentConnectionStatus = "Starting...";
-    let currentGameflowStatus = "Waiting for League Client...";
-
-    // Cache for normalized champion names (performance optimization for search)
-    let normalizedChampionCache = new Map();
-
-    function debounce(func, delay) {
-        let timeoutId;
-        let lastArgs;
-        let lastThis;
-
-        const debounced = function (...args) {
-            lastArgs = args;
-            lastThis = this;
-
-            if (timeoutId !== undefined) {
-                clearTimeout(timeoutId);
-            }
-
-            timeoutId = setTimeout(() => {
-                timeoutId = undefined;
-                func.apply(lastThis, lastArgs);
-            }, delay);
-        };
-
-        debounced.cancel = () => {
-            if (timeoutId !== undefined) {
-                clearTimeout(timeoutId);
-                timeoutId = undefined;
-            }
-        };
-
-        return debounced;
-    }
-
-    function throttle(func, limit) {
-        let inThrottle;
-        return function (...args) {
-            if (!inThrottle) {
-                func.apply(this, args);
-                inThrottle = true;
-                setTimeout(() => inThrottle = false, limit);
-            }
-        };
-    }
-
-    const settingsChangeHandler = (event) => {
-        const target = event.target;
-        if (target.type === 'checkbox' && target.dataset.setting) {
-            // Batch DOM updates
-            requestAnimationFrame(() => {
-                window.tauriAPI.send('update_checkbox', {
-                    id: target.dataset.setting,
-                    checked: target.checked
-                });
-
-                if (target.dataset.setting === 'spell-selection') {
-                    updateSpellWarning();
-                }
-                if (target.dataset.setting === 'pick-ban-selection') {
-                    elements.pickBanSection.style.display = target.checked ? 'block' : 'none';
-                }
-                updateSettingsSummary();
-
-                const currentSettings = {
-                    autoAccept: document.getElementById('auto-accept-checkbox').checked,
-                    pickBanSelection: document.getElementById('pick-ban-selection-checkbox').checked,
-                    spellSelection: document.getElementById('spell-selection-checkbox').checked,
-                };
-
-                window.tauriAPI.updateTrayTooltip(
-                    currentConnectionStatus,
-                    currentGameflowStatus,
-                    currentSettings
-                );
-            });
+    document.addEventListener(
+      "click",
+      (event) => {
+        if (!event.target.closest(".dropdown")) {
+          elements.fileDropdownContent.classList.remove("show");
         }
-    };
+      },
+      { passive: true },
+    );
 
-    elements.settingsSection.addEventListener('change', settingsChangeHandler, { passive: true });
+    // About button handler
+    const aboutButton = document.getElementById("about-button");
+    aboutButton?.addEventListener("click", showAboutModal, { passive: true });
+  }
 
-    const debouncedPickInput = debounce((value) => {
-        window.tauriAPI.send('update_pick_ban_text', { type: 'pick', text: value });
-    }, 300);
-
-    const debouncedBanInput = debounce((value) => {
-        window.tauriAPI.send('update_pick_ban_text', { type: 'ban', text: value });
-    }, 300);
-
-    const throttledShowPickSuggestions = throttle(showPickSuggestions, 100);
-    const throttledShowBanSuggestions = throttle(showBanSuggestions, 100);
-
-    const pickInputHandler = (event) => {
-        const value = event.target.value;
-        debouncedPickInput(value);
+  function setupInputEventListeners() {
+    // Optimized focus handlers
+    const pickFocusHandler = (event) => {
+      const value = event.target.value.trim();
+      if (value) {
         throttledShowPickSuggestions(value);
+      }
     };
 
-    const banInputHandler = (event) => {
-        const value = event.target.value;
-        debouncedBanInput(value);
+    const banFocusHandler = (event) => {
+      const value = event.target.value.trim();
+      if (value) {
         throttledShowBanSuggestions(value);
+      }
     };
 
-    elements.pickTextInput.addEventListener('input', pickInputHandler, { passive: true });
-    elements.banTextInput.addEventListener('input', banInputHandler, { passive: true });
-
-    function buildNormalizedChampionCache() {
-        normalizedChampionCache.clear();
-        for (let i = 0; i < champions.length; i++) {
-            const champion = champions[i];
-            const normalized = champion.name.toLowerCase().replace(/[ ']/g, '');
-            normalizedChampionCache.set(champion.id, normalized);
-        }
-    }
-
-    function updateSettingsSummary() {
-        const checkboxes = elements.settingsSection.querySelectorAll('input[type="checkbox"][data-setting]');
-        const activeSettings = [];
-
-        for (let i = 0; i < checkboxes.length; i++) {
-            const checkbox = checkboxes[i];
-            if (checkbox.checked) {
-                const label = document.querySelector(`label[for="${checkbox.id}"]`);
-                if (label) {
-                    // Map UI labels to main process expected strings
-                    const settingName = checkbox.id === 'auto-accept-checkbox' ? 'Auto-Accept' : label.textContent;
-                    activeSettings.push(settingName);
-                }
-            }
-        }
-
-        elements.settingsSummary.textContent = activeSettings.length > 0
-            ? `On: ${activeSettings.join(', ')}`
-            : "All Off";
-
-
-    }
-
-    function setupCollapsibleSections() {
-        const sectionHeaders = document.querySelectorAll('.section-header');
-        const clickHandler = (event) => {
-            const header = event.currentTarget;
-            const section = header.parentElement;
-            const sectionId = section.id;
-
-            section.classList.toggle('collapsed');
-            const isCollapsed = section.classList.contains('collapsed');
-            localStorage.setItem(`${sectionId}-collapsed`, isCollapsed);
-        };
-
-        for (let i = 0; i < sectionHeaders.length; i++) {
-            const header = sectionHeaders[i];
-            const section = header.parentElement;
-            const sectionId = section.id;
-
-            if (localStorage.getItem(`${sectionId}-collapsed`) === 'true') {
-                section.classList.add('collapsed');
-            }
-
-            header.addEventListener('click', clickHandler, { passive: true });
-        }
-    }
-
-    function setupThemeToggle() {
-        const currentTheme = localStorage.getItem('theme') || 'light-theme';
-        document.body.classList.add(currentTheme);
-        updateThemeIcon(currentTheme);
-
-        const themeToggleHandler = () => {
-            const isDark = document.body.classList.contains('dark-theme');
-            const newTheme = isDark ? 'light-theme' : 'dark-theme';
-
-            // Batch DOM updates
-            requestAnimationFrame(() => {
-                document.body.classList.remove('light-theme', 'dark-theme');
-                document.body.classList.add(newTheme);
-                localStorage.setItem('theme', newTheme);
-                updateThemeIcon(newTheme);
-            });
-        };
-
-        elements.themeToggleButton.addEventListener('click', themeToggleHandler, { passive: true });
-    }
-
-    function updateThemeIcon(theme) {
-        const isDark = theme === 'dark-theme';
-        elements.themeIcon.classList.toggle('fa-moon', isDark);
-        elements.themeIcon.classList.toggle('fa-sun', !isDark);
-    }
-
-    function setupIPCListeners() {
-        window.tauriAPI.on('status-update', (data) => {
-            // Batch DOM updates
-            requestAnimationFrame(() => {
-                updateConnectionStatus(data);
-                if (data.gameflowStatus !== undefined) {
-                    currentGameflowStatus = data.gameflowStatus;
-                    elements.gameflowStatus.textContent = data.gameflowStatus;
-                }
-                if (data.assignedRole !== undefined) {
-                    updateAssignedRole(data.assignedRole);
-                }
-
-                // Update checkbox states based on main process settings
-                if (data.settings) {
-                    document.getElementById('auto-accept-checkbox').checked = data.settings.autoAccept;
-                    document.getElementById('pick-ban-selection-checkbox').checked = data.settings.pickBanSelection;
-                    document.getElementById('spell-selection-checkbox').checked = data.settings.spellSelection;
-
-
-                    // Ensure pick/ban section visibility is correct on update
-                    elements.pickBanSection.style.display = data.settings.pickBanSelection ? 'block' : 'none';
-                    updateSpellWarning();
-                }
-                updateSettingsSummary();
-            });
-        });
-    }
-
-    async function fetchAndInitializeData() {
-        try {
-            const initialData = await window.tauriAPI.getChampionsAndSpells();
-            console.log('Fetched initial data:', initialData);
-            champions = initialData.champions || [];
-            summonerSpells = initialData.summonerSpells || [];
-            console.log('Champions loaded:', champions.length);
-            console.log('Spells loaded:', summonerSpells.length);
-            buildNormalizedChampionCache();
-            populateSpellSelection();
-
-            const gameState = await window.tauriAPI.getCurrentGameState();
-            console.log('Fetched game state:', gameState);
-            updateConnectionStatus(gameState);
-            if (gameState.gameflowStatus !== undefined) {
-                currentGameflowStatus = gameState.gameflowStatus;
-                elements.gameflowStatus.textContent = gameState.gameflowStatus;
-            }
-            if (gameState.assignedRole !== undefined) {
-                updateAssignedRole(gameState.assignedRole);
-            }
-            if (gameState.settings) {
-                document.getElementById('auto-accept-checkbox').checked = gameState.settings.autoAccept;
-                document.getElementById('pick-ban-selection-checkbox').checked = gameState.settings.pickBanSelection;
-                document.getElementById('spell-selection-checkbox').checked = gameState.settings.spellSelection;
-                elements.pickBanSection.style.display = gameState.settings.pickBanSelection ? 'block' : 'none';
-                updateSpellWarning();
-            }
-            updateSettingsSummary();
-
-            // Update tray tooltip with initial game state and settings - FIXED
-            if (gameState.connectionStatus && gameState.gameflowStatus && gameState.settings) {
-                window.tauriAPI.updateTrayTooltip(
-                    gameState.connectionStatus,
-                    gameState.gameflowStatus,
-                    gameState.settings
-                );
-            }
-
-        } catch (error) {
-            console.error('Failed to fetch initial data or game state:', error);
-        }
-    }
-
-    function updateConnectionStatus(data) {
-        if (data.isLeagueRunning !== undefined) {
-            lastIsLeagueRunning = data.isLeagueRunning;
-        }
-
-        if (data.connectionStatus !== undefined) {
-            currentConnectionStatus = data.connectionStatus;
-            const statusText = lastIsLeagueRunning
-                ? `✅ ${currentConnectionStatus || 'League Client Running'}`
-                : `❌ ${currentConnectionStatus || 'League Client not running'}`;
-            elements.connectionStatus.textContent = statusText;
-        }
-
-        elements.connectionStatus.className = lastIsLeagueRunning ? 'status-connected' : 'status-disconnected';
-    }
-
-    function updateAssignedRole(role) {
-        if (role) {
-            elements.assignedRole.textContent = `Role: ${role}`;
-            elements.assignedRole.style.display = 'block';
-        } else {
-            elements.assignedRole.style.display = 'none';
-        }
-    }
-
-    function setupButtonHandlers() {
-        const clearHandler = () => {
-            // Batch all updates
-            championPicks.length = 0;
-            banPick = null;
-            elements.pickTextInput.value = '';
-            elements.banTextInput.value = '';
-
-            requestAnimationFrame(() => {
-                updatePickBanDisplay();
-                window.tauriAPI.send('clear_picks_bans');
-                showTemporaryLabel(elements.pickBanStatus, 'Picks and bans cleared.', 3000);
-            });
-        };
-
-        elements.clearPicksBansButton.addEventListener('click', clearHandler, { passive: true });
-
-        elements.fileMenuButton.addEventListener('click', (event) => {
-            event.stopPropagation();
-            elements.fileDropdownContent.classList.toggle('show');
-        }, { passive: true });
-
-        elements.hideAppButton.addEventListener('click', () => {
-            window.tauriAPI.send('hide_app');
-            elements.fileDropdownContent.classList.remove('show');
-        }, { passive: true });
-
-        document.addEventListener('click', (event) => {
-            if (!event.target.closest('.dropdown')) {
-                elements.fileDropdownContent.classList.remove('show');
-            }
-        }, { passive: true });
-    }
-
-    function setupInputEventListeners() {
-        // Optimized focus handlers
-        const pickFocusHandler = (event) => {
-            const value = event.target.value.trim();
-            if (value) {
-                throttledShowPickSuggestions(value);
-            }
-        };
-
-        const banFocusHandler = (event) => {
-            const value = event.target.value.trim();
-            if (value) {
-                throttledShowBanSuggestions(value);
-            }
-        };
-
-        // Optimized blur handlers with cleanup
-        const pickBlurHandler = () => {
-            setTimeout(() => {
-                hidePickSuggestions();
-                debouncedPickInput.cancel();
-            }, 150);
-        };
-
-        const banBlurHandler = () => {
-            setTimeout(() => {
-                hideBanSuggestions();
-                debouncedBanInput.cancel();
-            }, 150);
-        };
-
-        elements.pickTextInput.addEventListener('focus', pickFocusHandler, { passive: true });
-        elements.pickTextInput.addEventListener('blur', pickBlurHandler, { passive: true });
-        elements.pickTextInput.addEventListener('keydown', handlePickKeydown);
-
-        elements.banTextInput.addEventListener('focus', banFocusHandler, { passive: true });
-        elements.banTextInput.addEventListener('blur', banBlurHandler, { passive: true });
-        elements.banTextInput.addEventListener('keydown', handleBanKeydown);
-    }
-
-    function handlePickKeydown(event) {
-        switch (event.key) {
-            case 'ArrowDown':
-                event.preventDefault();
-                navigatePickSuggestions(1);
-                break;
-            case 'ArrowUp':
-                event.preventDefault();
-                navigatePickSuggestions(-1);
-                break;
-            case 'ArrowRight':
-                if (pickSuggestionsCount > 0 && event.target.selectionStart === event.target.value.length) {
-                    event.preventDefault();
-                    const suggestionToFill = pickHighlightedIndex >= 0
-                        ? currentPickSuggestions[pickHighlightedIndex]
-                        : currentPickSuggestions[0];
-                    event.target.value = suggestionToFill.name;
-                    hidePickSuggestions();
-                    requestAnimationFrame(() => {
-                        event.target.setSelectionRange(event.target.value.length, event.target.value.length);
-                    });
-                }
-                break;
-            case 'Enter':
-                event.preventDefault();
-                handlePickEnter(event.target);
-                break;
-            case 'Escape':
-                hidePickSuggestions();
-                break;
-        }
-    }
-
-    function handleBanKeydown(event) {
-        switch (event.key) {
-            case 'ArrowDown':
-                event.preventDefault();
-                navigateBanSuggestions(1);
-                break;
-            case 'ArrowUp':
-                event.preventDefault();
-                navigateBanSuggestions(-1);
-                break;
-            case 'ArrowRight':
-                if (banSuggestionsCount > 0 && event.target.selectionStart === event.target.value.length) {
-                    event.preventDefault();
-                    const suggestionToFill = banHighlightedIndex >= 0
-                        ? currentBanSuggestions[banHighlightedIndex]
-                        : currentBanSuggestions[0];
-                    event.target.value = suggestionToFill.name;
-                    hideBanSuggestions();
-                    requestAnimationFrame(() => {
-                        event.target.setSelectionRange(event.target.value.length, event.target.value.length);
-                    });
-                }
-                break;
-            case 'Enter':
-                event.preventDefault();
-                handleBanEnter(event.target);
-                break;
-            case 'Escape':
-                hideBanSuggestions();
-                break;
-        }
-    }
-
-    function handlePickEnter(input) {
-        if (pickHighlightedIndex >= 0 && pickSuggestionsCount > 0) {
-            selectPickChampion(currentPickSuggestions[pickHighlightedIndex]);
-        } else {
-            const text = input.value.trim().toLowerCase().replace(/[ ']/g, '');
-            if (text === '') {
-                if (championPicks.length < 2) {
-                    championPicks.push({ id: 0, name: '' });
-                    updatePickBanDisplay();
-                }
-            } else {
-                const matchingChampion = findChampionByNormalizedName(text);
-                if (matchingChampion) {
-                    selectPickChampion(matchingChampion);
-                } else {
-                    showTemporaryLabel(elements.pickNotFoundLabel, 'No champion found.', 1500);
-                }
-            }
-        }
-    }
-
-    function handleBanEnter(input) {
-        if (banHighlightedIndex >= 0 && banSuggestionsCount > 0) {
-            selectBanChampion(currentBanSuggestions[banHighlightedIndex]);
-        } else {
-            const text = input.value.trim().toLowerCase().replace(/[ ']/g, '');
-            if (text === '') {
-                banPick = { id: 0, name: '' };
-                updatePickBanDisplay();
-            } else {
-                const matchingChampion = findChampionByNormalizedName(text);
-                if (matchingChampion) {
-                    selectBanChampion(matchingChampion);
-                } else {
-                    showTemporaryLabel(elements.banNotFoundLabel, 'No champion found.', 1500);
-                }
-            }
-        }
-    }
-
-    function findChampionByNormalizedName(normalizedText) {
-        for (let i = 0; i < champions.length; i++) {
-            const champion = champions[i];
-            if (normalizedChampionCache.get(champion.id) === normalizedText) {
-                return champion;
-            }
-        }
-        return null;
-    }
-
-    function showPickSuggestions(query) {
-        showSuggestions(
-            elements.pickSuggestions,
-            query,
-            champions,
-            currentPickSuggestions,
-            selectPickChampion,
-            (count) => { pickSuggestionsCount = count; }
-        );
-        pickHighlightedIndex = -1;
-    }
-
-    function hidePickSuggestions() {
-        hideSuggestions(elements.pickSuggestions);
-        pickSuggestionsCount = 0;
-        pickHighlightedIndex = -1;
-    }
-
-    function navigatePickSuggestions(direction) {
-        pickHighlightedIndex = navigateSuggestions(
-            elements.pickSuggestions,
-            currentPickSuggestions,
-            pickHighlightedIndex,
-            direction,
-            pickSuggestionsCount
-        );
-    }
-
-    function showBanSuggestions(query) {
-        showSuggestions(
-            elements.banSuggestions,
-            query,
-            champions,
-            currentBanSuggestions,
-            selectBanChampion,
-            (count) => { banSuggestionsCount = count; }
-        );
-        banHighlightedIndex = -1;
-    }
-
-    function hideBanSuggestions() {
-        hideSuggestions(elements.banSuggestions);
-        banSuggestionsCount = 0;
-        banHighlightedIndex = -1;
-    }
-
-    function navigateBanSuggestions(direction) {
-        banHighlightedIndex = navigateSuggestions(
-            elements.banSuggestions,
-            currentBanSuggestions,
-            banHighlightedIndex,
-            direction,
-            banSuggestionsCount
-        );
-    }
-
-    function showSuggestions(dropdown, query, source, suggestions, selectHandler, setCount) {
-        if (!query.trim()) {
-            hideSuggestions(dropdown);
-            setCount(0);
-            return;
-        }
-
-        const normalizedQuery = query.toLowerCase().replace(/[ ']/g, '');
-        let count = 0;
-
-        // Optimized search with early termination
-        for (let i = 0; i < source.length && count < 8; i++) {
-            const champion = source[i];
-            const normalizedName = normalizedChampionCache.get(champion.id);
-            if (normalizedName && normalizedName.includes(normalizedQuery)) {
-                suggestions[count] = champion;
-                count++;
-            }
-        }
-
-        setCount(count);
-
-        if (count === 0) {
-            hideSuggestions(dropdown);
-            return;
-        }
-
-        // Use DocumentFragment for better performance
-        const fragment = document.createDocumentFragment();
-        for (let i = 0; i < count; i++) {
-            const champion = suggestions[i];
-            const item = document.createElement('div');
-            item.className = 'suggestion-item';
-            item.innerHTML = `<span class="champion-name">${champion.name}</span><span class="champion-id">ID: ${champion.id}</span>`;
-
-            // Use closure to capture champion reference
-            item.addEventListener('click', ((c) => () => selectHandler(c))(champion), { passive: true });
-            fragment.appendChild(item);
-        }
-
-        // Batch DOM update
-        requestAnimationFrame(() => {
-            dropdown.innerHTML = '';
-            dropdown.appendChild(fragment);
-            dropdown.classList.add('show');
-        });
-    }
-
-    function hideSuggestions(dropdown) {
-        dropdown.classList.remove('show');
-    }
-
-    function navigateSuggestions(dropdown, suggestions, highlightedIndex, direction, count) {
-        if (count === 0) return highlightedIndex;
-
-        const items = dropdown.children;
-
-        // Remove current highlighting
-        if (highlightedIndex >= 0 && highlightedIndex < items.length) {
-            items[highlightedIndex].classList.remove('highlighted');
-        }
-
-        // Calculate new index
-        highlightedIndex += direction;
-        if (highlightedIndex >= count) {
-            highlightedIndex = 0;
-        } else if (highlightedIndex < 0) {
-            highlightedIndex = count - 1;
-        }
-
-        // Add highlighting to new item
-        if (highlightedIndex >= 0 && highlightedIndex < items.length) {
-            items[highlightedIndex].classList.add('highlighted');
-            items[highlightedIndex].scrollIntoView({
-                block: 'nearest',
-                behavior: 'smooth'
-            });
-        }
-
-        return highlightedIndex;
-    }
-
-    function selectPickChampion(champion) {
-        if (championPicks.length >= 2) {
-            showTemporaryLabel(elements.pickNotFoundLabel, 'Maximum picks reached (2).', 1500);
-            return;
-        }
-
-        // Use faster lookup for duplicate check
-        for (let i = 0; i < championPicks.length; i++) {
-            if (championPicks[i].id === champion.id) {
-                showTemporaryLabel(elements.pickNotFoundLabel, 'Champion already selected.', 1500);
-                return;
-            }
-        }
-
-        championPicks.push(champion);
-        elements.pickTextInput.value = '';
+    // Optimized blur handlers with cleanup
+    const pickBlurHandler = () => {
+      setTimeout(() => {
         hidePickSuggestions();
-        updatePickBanDisplay();
-
-        // Send the full champion name to the backend
-        window.tauriAPI.send('update_pick_ban_text', {
-            type: 'pick',
-            text: champion.name
-        });
-    }
-
-    function selectBanChampion(champion) {
-        // Check if champion is already picked
-        for (let i = 0; i < championPicks.length; i++) {
-            if (championPicks[i].id === champion.id) {
-                showTemporaryLabel(elements.banNotFoundLabel, 'Champion already selected as pick.', 1500);
-                return;
-            }
-        }
-
-        banPick = champion;
-        elements.banTextInput.value = '';
-        hideBanSuggestions();
-        updatePickBanDisplay();
-
-        window.tauriAPI.send('update_pick_ban_text', {
-            type: 'ban',
-            text: champion.name
-        });
-    }
-
-    function removePickChampion(index) {
-        championPicks.splice(index, 1);
-        updatePickBanDisplay();
-    }
-
-    function removeBanChampion() {
-        banPick = null;
-        updatePickBanDisplay();
-    }
-
-    function updatePickBanDisplay() {
-        // Batch DOM updates
-        requestAnimationFrame(() => {
-            updateDisplay(elements.currentPicks, 'Picks:', championPicks, removePickChampion);
-            updateDisplay(elements.currentBans, 'Ban:', banPick ? [banPick] : [], removeBanChampion);
-        });
-    }
-
-    function updateDisplay(container, headerText, items, removeHandler) {
-        // Use DocumentFragment for better performance
-        const fragment = document.createDocumentFragment();
-
-        if (items.length > 0) {
-            const header = document.createElement('strong');
-            header.textContent = headerText;
-            fragment.appendChild(header);
-
-            for (let i = 0; i < items.length; i++) {
-                const itemElement = createChampionItem(items[i], i, removeHandler);
-                fragment.appendChild(itemElement);
-            }
-        }
-
-        container.innerHTML = '';
-        container.appendChild(fragment);
-    }
-
-    function createChampionItem(champion, index, removeHandler) {
-        const championItem = document.createElement('div');
-        championItem.className = 'champion-item';
-
-        const championInfo = document.createElement('span');
-        championInfo.className = 'champion-info';
-        championInfo.textContent = champion.name
-            ? `${champion.name} (ID: ${champion.id})`
-            : 'None (Skip)';
-
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'remove-btn';
-        removeBtn.innerHTML = '×';
-        removeBtn.title = 'Remove champion';
-        removeBtn.addEventListener('click', () => removeHandler(index), { passive: true });
-
-        championItem.appendChild(championInfo);
-        championItem.appendChild(removeBtn);
-        return championItem;
-    }
-
-    function populateSpellSelection() {
-        const spellDropdowns = [elements.spell1Dropdown, elements.spell2Dropdown];
-
-        // Create options fragment once and clone
-        const fragment = document.createDocumentFragment();
-        const defaultOption = document.createElement('option');
-        defaultOption.value = '';
-        defaultOption.textContent = 'None';
-        fragment.appendChild(defaultOption);
-
-        for (let i = 0; i < summonerSpells.length; i++) {
-            const spell = summonerSpells[i];
-            const option = document.createElement('option');
-            option.value = spell.name;
-            option.textContent = spell.name;
-            fragment.appendChild(option);
-        }
-
-        // Populate both dropdowns
-        spellDropdowns.forEach(dropdown => {
-            dropdown.innerHTML = '';
-            dropdown.appendChild(fragment.cloneNode(true));
-        });
-
-        const spell1ChangeHandler = (event) => {
-            selectedSpell1 = event.target.value;
-            const imageSrc = selectedSpell1
-                ? `./images/${selectedSpell1.toLowerCase()}.webp`
-                : './images/no_icon.webp';
-            elements.spell1Image.src = imageSrc;
-            window.tauriAPI.send('update_selected_spell', { spellSlot: 1, spellName: selectedSpell1 });
-            updateSpellWarning();
-        };
-
-        const spell2ChangeHandler = (event) => {
-            selectedSpell2 = event.target.value;
-            const imageSrc = selectedSpell2
-                ? `./images/${selectedSpell2.toLowerCase()}.webp`
-                : './images/no_icon.webp';
-            elements.spell2Image.src = imageSrc;
-            window.tauriAPI.send('update_selected_spell', { spellSlot: 2, spellName: selectedSpell2 });
-            updateSpellWarning();
-        };
-
-        elements.spell1Dropdown.addEventListener('change', spell1ChangeHandler, { passive: true });
-        elements.spell2Dropdown.addEventListener('change', spell2ChangeHandler, { passive: true });
-
-        // Set default images
-        elements.spell1Image.src = './images/no_icon.webp';
-        elements.spell2Image.src = './images/no_icon.webp';
-    }
-
-    function updateSpellWarning() {
-        const checkbox = document.getElementById('spell-selection-checkbox');
-        const isSpellSelectionOn = checkbox && checkbox.checked;
-        const shouldShow = isSpellSelectionOn && (!selectedSpell1 || !selectedSpell2);
-        elements.spellWarningLabel.style.display = shouldShow ? 'block' : 'none';
-    }
-
-    // Optimized temporary label with cleanup
-    const activeLabelTimeouts = new Set();
-
-    function showTemporaryLabel(element, message, duration) {
-        // Clear any existing timeout for this element
-        activeLabelTimeouts.forEach(timeoutId => {
-            if (element.dataset.timeoutId === String(timeoutId)) {
-                clearTimeout(timeoutId);
-                activeLabelTimeouts.delete(timeoutId);
-            }
-        });
-
-        element.textContent = message;
-        element.style.display = 'block';
-
-        const timeoutId = setTimeout(() => {
-            element.style.display = 'none';
-            element.textContent = '';
-            element.dataset.timeoutId = '';
-            activeLabelTimeouts.delete(timeoutId);
-        }, duration);
-
-        element.dataset.timeoutId = String(timeoutId);
-        activeLabelTimeouts.add(timeoutId);
-    }
-
-    function setInitialDisplay() {
-        // Batch initial display setup
-        const elementsToHide = [
-            elements.pickBanSection,
-            elements.pickNotFoundLabel,
-            elements.banNotFoundLabel,
-            elements.spellWarningLabel
-        ];
-
-        elementsToHide.forEach(element => {
-            element.style.display = 'none';
-        });
-
-        // Optimized global click handler with event delegation
-        const globalClickHandler = (event) => {
-            if (!event.target.closest('.autocomplete-container')) {
-                hidePickSuggestions();
-                hideBanSuggestions();
-            }
-        };
-
-        document.addEventListener('click', globalClickHandler, { passive: true, capture: true });
-    }
-
-    function cleanup() {
         debouncedPickInput.cancel();
+      }, 150);
+    };
+
+    const banBlurHandler = () => {
+      setTimeout(() => {
+        hideBanSuggestions();
         debouncedBanInput.cancel();
+      }, 150);
+    };
 
-        activeLabelTimeouts.forEach(timeoutId => {
-            clearTimeout(timeoutId);
-        });
-        activeLabelTimeouts.clear();
+    elements.pickTextInput.addEventListener("focus", pickFocusHandler, {
+      passive: true,
+    });
+    elements.pickTextInput.addEventListener("blur", pickBlurHandler, {
+      passive: true,
+    });
+    elements.pickTextInput.addEventListener("keydown", handlePickKeydown);
 
-        normalizedChampionCache.clear();
+    elements.banTextInput.addEventListener("focus", banFocusHandler, {
+      passive: true,
+    });
+    elements.banTextInput.addEventListener("blur", banBlurHandler, {
+      passive: true,
+    });
+    elements.banTextInput.addEventListener("keydown", handleBanKeydown);
+  }
+
+  function handlePickKeydown(event) {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        navigatePickSuggestions(1);
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        navigatePickSuggestions(-1);
+        break;
+      case "ArrowRight":
+        if (
+          pickSuggestionsCount > 0 &&
+          event.target.selectionStart === event.target.value.length
+        ) {
+          event.preventDefault();
+          const suggestionToFill =
+            pickHighlightedIndex >= 0
+              ? currentPickSuggestions[pickHighlightedIndex]
+              : currentPickSuggestions[0];
+          event.target.value = suggestionToFill.name;
+          hidePickSuggestions();
+          requestAnimationFrame(() => {
+            event.target.setSelectionRange(
+              event.target.value.length,
+              event.target.value.length,
+            );
+          });
+        }
+        break;
+      case "Enter":
+        event.preventDefault();
+        handlePickEnter(event.target);
+        break;
+      case "Escape":
+        hidePickSuggestions();
+        break;
+    }
+  }
+
+  function handleBanKeydown(event) {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        navigateBanSuggestions(1);
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        navigateBanSuggestions(-1);
+        break;
+      case "ArrowRight":
+        if (
+          banSuggestionsCount > 0 &&
+          event.target.selectionStart === event.target.value.length
+        ) {
+          event.preventDefault();
+          const suggestionToFill =
+            banHighlightedIndex >= 0
+              ? currentBanSuggestions[banHighlightedIndex]
+              : currentBanSuggestions[0];
+          event.target.value = suggestionToFill.name;
+          hideBanSuggestions();
+          requestAnimationFrame(() => {
+            event.target.setSelectionRange(
+              event.target.value.length,
+              event.target.value.length,
+            );
+          });
+        }
+        break;
+      case "Enter":
+        event.preventDefault();
+        handleBanEnter(event.target);
+        break;
+      case "Escape":
+        hideBanSuggestions();
+        break;
+    }
+  }
+
+  function handlePickEnter(input) {
+    if (pickHighlightedIndex >= 0 && pickSuggestionsCount > 0) {
+      selectPickChampion(currentPickSuggestions[pickHighlightedIndex]);
+    } else {
+      const text = input.value.trim().toLowerCase().replace(/[ ']/g, "");
+      if (text === "") {
+        if (championPicks.length < 2) {
+          championPicks.push({ id: 0, name: "" });
+          updatePickBanDisplay();
+        }
+      } else {
+        const matchingChampion = findChampionByNormalizedName(text);
+        if (matchingChampion) {
+          selectPickChampion(matchingChampion);
+        } else {
+          showTemporaryLabel(
+            elements.pickNotFoundLabel,
+            "No champion found.",
+            1500,
+          );
+        }
+      }
+    }
+  }
+
+  function handleBanEnter(input) {
+    if (banHighlightedIndex >= 0 && banSuggestionsCount > 0) {
+      selectBanChampion(currentBanSuggestions[banHighlightedIndex]);
+    } else {
+      const text = input.value.trim().toLowerCase().replace(/[ ']/g, "");
+      if (text === "") {
+        banPick = { id: 0, name: "" };
+        updatePickBanDisplay();
+      } else {
+        const matchingChampion = findChampionByNormalizedName(text);
+        if (matchingChampion) {
+          selectBanChampion(matchingChampion);
+        } else {
+          showTemporaryLabel(
+            elements.banNotFoundLabel,
+            "No champion found.",
+            1500,
+          );
+        }
+      }
+    }
+  }
+
+  function findChampionByNormalizedName(normalizedText) {
+    for (let i = 0; i < champions.length; i++) {
+      const champion = champions[i];
+      if (normalizedChampionCache.get(champion.id) === normalizedText) {
+        return champion;
+      }
+    }
+    return null;
+  }
+
+  function showPickSuggestions(query) {
+    showSuggestions(
+      elements.pickSuggestions,
+      query,
+      champions,
+      currentPickSuggestions,
+      selectPickChampion,
+      (count) => {
+        pickSuggestionsCount = count;
+      },
+    );
+    pickHighlightedIndex = -1;
+  }
+
+  function hidePickSuggestions() {
+    hideSuggestions(elements.pickSuggestions);
+    pickSuggestionsCount = 0;
+    pickHighlightedIndex = -1;
+  }
+
+  function navigatePickSuggestions(direction) {
+    pickHighlightedIndex = navigateSuggestions(
+      elements.pickSuggestions,
+      currentPickSuggestions,
+      pickHighlightedIndex,
+      direction,
+      pickSuggestionsCount,
+    );
+  }
+
+  function showBanSuggestions(query) {
+    showSuggestions(
+      elements.banSuggestions,
+      query,
+      champions,
+      currentBanSuggestions,
+      selectBanChampion,
+      (count) => {
+        banSuggestionsCount = count;
+      },
+    );
+    banHighlightedIndex = -1;
+  }
+
+  function hideBanSuggestions() {
+    hideSuggestions(elements.banSuggestions);
+    banSuggestionsCount = 0;
+    banHighlightedIndex = -1;
+  }
+
+  function navigateBanSuggestions(direction) {
+    banHighlightedIndex = navigateSuggestions(
+      elements.banSuggestions,
+      currentBanSuggestions,
+      banHighlightedIndex,
+      direction,
+      banSuggestionsCount,
+    );
+  }
+
+  function showSuggestions(
+    dropdown,
+    query,
+    source,
+    suggestions,
+    selectHandler,
+    setCount,
+  ) {
+    if (!query.trim()) {
+      hideSuggestions(dropdown);
+      setCount(0);
+      return;
     }
 
-    // Listen for page unload to cleanup
-    window.addEventListener('beforeunload', cleanup, { passive: true });
+    const normalizedQuery = query.toLowerCase().replace(/[ ']/g, "");
+    let count = 0;
 
-    function init() {
-        setupCollapsibleSections();
-        setupThemeToggle();
-        setupIPCListeners();
-        setupButtonHandlers();
-        setupInputEventListeners();
-        setInitialDisplay();
-        updateSettingsSummary();
-        fetchAndInitializeData();
+    // Optimized search with early termination
+    for (let i = 0; i < source.length && count < 8; i++) {
+      const champion = source[i];
+      const normalizedName = normalizedChampionCache.get(champion.id);
+      if (normalizedName && normalizedName.includes(normalizedQuery)) {
+        suggestions[count] = champion;
+        count++;
+      }
     }
 
-    init();
+    setCount(count);
+
+    if (count === 0) {
+      hideSuggestions(dropdown);
+      return;
+    }
+
+    // Use DocumentFragment for better performance
+    const fragment = document.createDocumentFragment();
+    for (let i = 0; i < count; i++) {
+      const champion = suggestions[i];
+      const item = document.createElement("div");
+      item.className = "suggestion-item";
+      item.innerHTML = `<span class="champion-name">${champion.name}</span><span class="champion-id">ID: ${champion.id}</span>`;
+
+      // Use closure to capture champion reference
+      item.addEventListener(
+        "click",
+        (
+          (c) => () =>
+            selectHandler(c)
+        )(champion),
+        { passive: true },
+      );
+      fragment.appendChild(item);
+    }
+
+    // Batch DOM update
+    requestAnimationFrame(() => {
+      dropdown.innerHTML = "";
+      dropdown.appendChild(fragment);
+      dropdown.classList.add("show");
+    });
+  }
+
+  function hideSuggestions(dropdown) {
+    dropdown.classList.remove("show");
+  }
+
+  function navigateSuggestions(
+    dropdown,
+    suggestions,
+    highlightedIndex,
+    direction,
+    count,
+  ) {
+    if (count === 0) return highlightedIndex;
+
+    const items = dropdown.children;
+
+    // Remove current highlighting
+    if (highlightedIndex >= 0 && highlightedIndex < items.length) {
+      items[highlightedIndex].classList.remove("highlighted");
+    }
+
+    // Calculate new index
+    highlightedIndex += direction;
+    if (highlightedIndex >= count) {
+      highlightedIndex = 0;
+    } else if (highlightedIndex < 0) {
+      highlightedIndex = count - 1;
+    }
+
+    // Add highlighting to new item
+    if (highlightedIndex >= 0 && highlightedIndex < items.length) {
+      items[highlightedIndex].classList.add("highlighted");
+      items[highlightedIndex].scrollIntoView({
+        block: "nearest",
+        behavior: "smooth",
+      });
+    }
+
+    return highlightedIndex;
+  }
+
+  function selectPickChampion(champion) {
+    if (championPicks.length >= 2) {
+      showTemporaryLabel(
+        elements.pickNotFoundLabel,
+        "Maximum picks reached (2).",
+        1500,
+      );
+      return;
+    }
+
+    // Use faster lookup for duplicate check
+    for (let i = 0; i < championPicks.length; i++) {
+      if (championPicks[i].id === champion.id) {
+        showTemporaryLabel(
+          elements.pickNotFoundLabel,
+          "Champion already selected.",
+          1500,
+        );
+        return;
+      }
+    }
+
+    championPicks.push(champion);
+    elements.pickTextInput.value = "";
+    hidePickSuggestions();
+    updatePickBanDisplay();
+
+    // Send the full champion name to the backend
+    window.tauriAPI.send("update_pick_ban_text", {
+      type: "pick",
+      text: champion.name,
+    });
+  }
+
+  function selectBanChampion(champion) {
+    // Check if champion is already picked
+    for (let i = 0; i < championPicks.length; i++) {
+      if (championPicks[i].id === champion.id) {
+        showTemporaryLabel(
+          elements.banNotFoundLabel,
+          "Champion already selected as pick.",
+          1500,
+        );
+        return;
+      }
+    }
+
+    banPick = champion;
+    elements.banTextInput.value = "";
+    hideBanSuggestions();
+    updatePickBanDisplay();
+
+    window.tauriAPI.send("update_pick_ban_text", {
+      type: "ban",
+      text: champion.name,
+    });
+  }
+
+  function removePickChampion(index) {
+    championPicks.splice(index, 1);
+    updatePickBanDisplay();
+  }
+
+  function removeBanChampion() {
+    banPick = null;
+    updatePickBanDisplay();
+  }
+
+  function updatePickBanDisplay() {
+    // Batch DOM updates
+    requestAnimationFrame(() => {
+      updateDisplay(
+        elements.currentPicks,
+        "Picks:",
+        championPicks,
+        removePickChampion,
+      );
+      updateDisplay(
+        elements.currentBans,
+        "Ban:",
+        banPick ? [banPick] : [],
+        removeBanChampion,
+      );
+    });
+  }
+
+  function updateDisplay(container, headerText, items, removeHandler) {
+    // Use DocumentFragment for better performance
+    const fragment = document.createDocumentFragment();
+
+    if (items.length > 0) {
+      const header = document.createElement("strong");
+      header.textContent = headerText;
+      fragment.appendChild(header);
+
+      for (let i = 0; i < items.length; i++) {
+        const itemElement = createChampionItem(items[i], i, removeHandler);
+        fragment.appendChild(itemElement);
+      }
+    }
+
+    container.innerHTML = "";
+    container.appendChild(fragment);
+  }
+
+  function createChampionItem(champion, index, removeHandler) {
+    const championItem = document.createElement("div");
+    championItem.className = "champion-item";
+
+    const championInfo = document.createElement("span");
+    championInfo.className = "champion-info";
+    championInfo.textContent = champion.name
+      ? `${champion.name} (ID: ${champion.id})`
+      : "None (Skip)";
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "remove-btn";
+    removeBtn.innerHTML = "×";
+    removeBtn.title = "Remove champion";
+    removeBtn.addEventListener("click", () => removeHandler(index), {
+      passive: true,
+    });
+
+    championItem.appendChild(championInfo);
+    championItem.appendChild(removeBtn);
+    return championItem;
+  }
+
+  function populateSpellSelection() {
+    const spellDropdowns = [elements.spell1Dropdown, elements.spell2Dropdown];
+
+    // Create options fragment once and clone
+    const fragment = document.createDocumentFragment();
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = "None";
+    fragment.appendChild(defaultOption);
+
+    for (let i = 0; i < summonerSpells.length; i++) {
+      const spell = summonerSpells[i];
+      const option = document.createElement("option");
+      option.value = spell.name;
+      option.textContent = spell.name;
+      fragment.appendChild(option);
+    }
+
+    // Populate both dropdowns
+    spellDropdowns.forEach((dropdown) => {
+      dropdown.innerHTML = "";
+      dropdown.appendChild(fragment.cloneNode(true));
+    });
+
+    const spell1ChangeHandler = (event) => {
+      selectedSpell1 = event.target.value;
+      const imageSrc = selectedSpell1
+        ? `./images/${selectedSpell1.toLowerCase()}.webp`
+        : "./images/no_icon.webp";
+      elements.spell1Image.src = imageSrc;
+      window.tauriAPI.send("update_selected_spell", {
+        spellSlot: 1,
+        spellName: selectedSpell1,
+      });
+      updateSpellWarning();
+    };
+
+    const spell2ChangeHandler = (event) => {
+      selectedSpell2 = event.target.value;
+      const imageSrc = selectedSpell2
+        ? `./images/${selectedSpell2.toLowerCase()}.webp`
+        : "./images/no_icon.webp";
+      elements.spell2Image.src = imageSrc;
+      window.tauriAPI.send("update_selected_spell", {
+        spellSlot: 2,
+        spellName: selectedSpell2,
+      });
+      updateSpellWarning();
+    };
+
+    elements.spell1Dropdown.addEventListener("change", spell1ChangeHandler, {
+      passive: true,
+    });
+    elements.spell2Dropdown.addEventListener("change", spell2ChangeHandler, {
+      passive: true,
+    });
+
+    // Set default images
+    elements.spell1Image.src = "./images/no_icon.webp";
+    elements.spell2Image.src = "./images/no_icon.webp";
+  }
+
+  function updateSpellWarning() {
+    const checkbox = document.getElementById("spell-selection-checkbox");
+    const isSpellSelectionOn = checkbox && checkbox.checked;
+    const shouldShow =
+      isSpellSelectionOn && (!selectedSpell1 || !selectedSpell2);
+    elements.spellWarningLabel.style.display = shouldShow ? "block" : "none";
+  }
+
+  // Optimized temporary label with cleanup
+  const activeLabelTimeouts = new Set();
+
+  function showTemporaryLabel(element, message, duration) {
+    // Clear any existing timeout for this element
+    activeLabelTimeouts.forEach((timeoutId) => {
+      if (element.dataset.timeoutId === String(timeoutId)) {
+        clearTimeout(timeoutId);
+        activeLabelTimeouts.delete(timeoutId);
+      }
+    });
+
+    element.textContent = message;
+    element.style.display = "block";
+
+    const timeoutId = setTimeout(() => {
+      element.style.display = "none";
+      element.textContent = "";
+      element.dataset.timeoutId = "";
+      activeLabelTimeouts.delete(timeoutId);
+    }, duration);
+
+    element.dataset.timeoutId = String(timeoutId);
+    activeLabelTimeouts.add(timeoutId);
+  }
+
+  function setInitialDisplay() {
+    // Batch initial display setup
+    const elementsToHide = [
+      elements.pickBanSection,
+      elements.pickNotFoundLabel,
+      elements.banNotFoundLabel,
+      elements.spellWarningLabel,
+    ];
+
+    elementsToHide.forEach((element) => {
+      element.style.display = "none";
+    });
+
+    // Optimized global click handler with event delegation
+    const globalClickHandler = (event) => {
+      if (!event.target.closest(".autocomplete-container")) {
+        hidePickSuggestions();
+        hideBanSuggestions();
+      }
+    };
+
+    document.addEventListener("click", globalClickHandler, {
+      passive: true,
+      capture: true,
+    });
+  }
+
+  function cleanup() {
+    debouncedPickInput.cancel();
+    debouncedBanInput.cancel();
+
+    activeLabelTimeouts.forEach((timeoutId) => {
+      clearTimeout(timeoutId);
+    });
+    activeLabelTimeouts.clear();
+
+    normalizedChampionCache.clear();
+  }
+
+  // Listen for page unload to cleanup
+  window.addEventListener("beforeunload", cleanup, { passive: true });
+
+  function showAboutModal() {
+    const modal = document.getElementById("about-modal");
+    if (modal) {
+      modal.style.display = "block";
+      // Prevent body scroll when modal is open
+      document.body.style.overflow = "hidden";
+    }
+  }
+
+  function hideAboutModal() {
+    const modal = document.getElementById("about-modal");
+    if (modal) {
+      modal.style.display = "none";
+      // Restore body scroll
+      document.body.style.overflow = "";
+    }
+  }
+
+  function setupAboutModal() {
+    const modal = document.getElementById("about-modal");
+    const closeButton = document.getElementById("close-about");
+
+    // Close modal when clicking the X button
+    closeButton?.addEventListener("click", hideAboutModal);
+
+    // Close modal when clicking outside of it
+    modal?.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        hideAboutModal();
+      }
+    });
+
+    // Close modal with Escape key
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && modal?.style.display === "block") {
+        hideAboutModal();
+      }
+    });
+
+    // Handle external links - open in default browser
+    const aboutLinks = modal?.querySelectorAll('a[href^="http"]');
+    aboutLinks?.forEach((link) => {
+      link.addEventListener("click", async (event) => {
+        event.preventDefault();
+        const url = link.getAttribute("href");
+        if (url) {
+          try {
+            // Use Tauri shell API to open URL in default browser
+            await window.tauriAPI.openExternal(url);
+            console.log("Successfully opened external link:", url);
+          } catch (error) {
+            console.error("Failed to open external link:", error);
+            // Fallback: copy to clipboard if available
+            if (navigator.clipboard) {
+              try {
+                await navigator.clipboard.writeText(url);
+                console.log("URL copied to clipboard as fallback:", url);
+                // Show temporary notification to user
+                const linkText = link.textContent;
+                alert(
+                  `Could not open ${linkText}. URL copied to clipboard: ${url}`,
+                );
+              } catch (clipboardError) {
+                console.error("Failed to copy to clipboard:", clipboardError);
+                alert(`Could not open link: ${url}`);
+              }
+            } else {
+              alert(`Could not open link: ${url}`);
+            }
+          }
+        }
+      });
+    });
+  }
+
+  // Initialize the application
+  async function init() {
+    setupCollapsibleSections();
+    setupThemeToggle();
+    await setupIPCListeners();
+    setupButtonHandlers();
+    setupInputEventListeners();
+    setupAboutModal();
+    fetchAndInitializeData();
+    setInitialDisplay();
+  }
+
+  (async () => {
+    await init();
+  })();
 });

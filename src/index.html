@@ -1,130 +1,222 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
+    <head>
+        <meta charset="UTF-8" />
+        <title>Watcher</title>
+        <link rel="icon" href="/assets/64x64.png" type="image/png" />
+        <meta
+            http-equiv="Content-Security-Policy"
+            content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost;"
+        />
+        <link rel="stylesheet" href="./style.css" />
+        <link rel="stylesheet" href="./vendor/all.min.css" />
+    </head>
 
-<head>
-    <meta charset="UTF-8">
-    <title>Watcher</title>
-    <link rel="icon" href="/assets/64x64.png" type="image/png">
-    <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost;">
-    <link rel="stylesheet" href="./style.css">
-    <link rel="stylesheet" href="./vendor/all.min.css">
-</head>
-
-<body>
-    <div id="top-panel">
-        <div class="top-panel-group">
-            <div class="dropdown">
-                <button class="dropbtn" id="file-menu-button">File</button>
-                <div class="dropdown-content" id="file-dropdown-content">
-                    <a href="#" id="hide-app-button">Hide App</a>
-                </div>
-            </div>
-            <button id="update-button" class="hidden">Update</button>
-        </div>
-        <div class="top-panel-group">
-            <button id="theme-toggle"><i id="theme-icon" class="fas fa-sun"></i></button>
-            <button>About</button>
-        </div>
-    </div>
-
-    <div id="main-content">
-        <div id="content-panel" class="panel">
-
-            <!-- Match State Section -->
-            <div class="content-section" id="match-state-section">
-                <h2 class="section-header">
-                    <div class="section-title-group">
-                        <span class="section-title">Match State</span>
-                    </div>
-                    <i class="fas fa-chevron-down"></i>
-                </h2>
-                <div class="section-content">
-                    <p>Gameflow Status: <span id="gameflow-status"></span></p>
-                    <p id="assigned-role"></p>
-                </div>
-            </div>
-
-            <!-- Settings Section -->
-            <div class="content-section" id="settings-section">
-                <h2 class="section-header">
-                    <div class="section-title-group">
-                        <span class="section-title">Settings</span>
-                        <span id="settings-summary" class="section-summary"></span>
-                    </div>
-                    <i class="fas fa-chevron-down"></i>
-                </h2>
-                <div class="section-content">
-                    <div class="horizontal-group">
-                        <button id="clear-picks-bans">Clear Picks/Bans</button>
-                        <span id="pick-ban-status" class="info-label"></span>
-                    </div>
-
-                    <div class="spell-selection-container">
-                        <div class="spell-group">
-                            <img id="spell1-image" src="./images/no_icon.webp" alt="Spell 1">
-                            <select id="spell1-dropdown"></select>
-                        </div>
-                        <div class="spell-separator">+</div>
-                        <div class="spell-group">
-                            <img id="spell2-image" src="./images/no_icon.webp" alt="Spell 2">
-                            <select id="spell2-dropdown"></select>
-                        </div>
-                    </div>
-
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="spell-selection-checkbox" data-setting="spell-selection">
-                        <label for="spell-selection-checkbox">Spell Auto Selection</label>
-                        <span id="spell-warning-label" class="warning-label">Both summoner spells need to be
-                            selected</span>
-                    </div>
-
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="auto-accept-checkbox" data-setting="auto-accept">
-                        <label for="auto-accept-checkbox">Auto Accept</label>
-                    </div>
-
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="pick-ban-selection-checkbox" data-setting="pick-ban-selection">
-                        <label for="pick-ban-selection-checkbox">Auto-Pick/Ban</label>
-                    </div>
-
-                    <div id="pick-ban-section">
-                        <h3>Picks and Bans</h3>
-                        <p>Enter champions to pick (2 max):</p>
-                        <div class="autocomplete-container">
-                            <input type="text" id="pick-text-input" placeholder="Press enter to skip."
-                                autocomplete="off">
-                            <div id="pick-suggestions" class="suggestions-dropdown"></div>
-                        </div>
-                        <span id="pick-not-found-label" class="warning-label"></span>
-                        <p>Enter champion to ban:</p>
-                        <div class="autocomplete-container">
-                            <input type="text" id="ban-text-input" placeholder="Press enter to skip."
-                                autocomplete="off">
-                            <div id="ban-suggestions" class="suggestions-dropdown"></div>
-                        </div>
-                        <span id="ban-not-found-label" class="warning-label"></span>
-                        <div id="current-picks"></div>
-                        <div id="current-bans"></div>
+    <body>
+        <div id="top-panel">
+            <div class="top-panel-group">
+                <div class="dropdown">
+                    <button class="dropbtn" id="file-menu-button">File</button>
+                    <div class="dropdown-content" id="file-dropdown-content">
+                        <a href="#" id="hide-app-button">Hide App</a>
                     </div>
                 </div>
+                <button id="update-button" class="hidden">Update</button>
+            </div>
+            <div class="top-panel-group">
+                <button id="theme-toggle">
+                    <i id="theme-icon" class="fas fa-sun"></i>
+                </button>
+                <button id="about-button">About</button>
             </div>
         </div>
-    </div>
 
-    <div class="status-footer">
-        <div class="left-status">
-            <p id="connection-status"></p>
+        <div id="main-content">
+            <div id="content-panel" class="panel">
+                <!-- Match State Section -->
+                <div class="content-section" id="match-state-section">
+                    <h2 class="section-header">
+                        <div class="section-title-group">
+                            <span class="section-title">Match State</span>
+                        </div>
+                        <i class="fas fa-chevron-down"></i>
+                    </h2>
+                    <div class="section-content">
+                        <p>
+                            Gameflow Status: <span id="gameflow-status"></span>
+                        </p>
+                        <p id="assigned-role"></p>
+                    </div>
+                </div>
+
+                <!-- Settings Section -->
+                <div class="content-section" id="settings-section">
+                    <h2 class="section-header">
+                        <div class="section-title-group">
+                            <span class="section-title">Settings</span>
+                            <span
+                                id="settings-summary"
+                                class="section-summary"
+                            ></span>
+                        </div>
+                        <i class="fas fa-chevron-down"></i>
+                    </h2>
+                    <div class="section-content">
+                        <div class="horizontal-group">
+                            <button id="clear-picks-bans">
+                                Clear Picks/Bans
+                            </button>
+                            <span
+                                id="pick-ban-status"
+                                class="info-label"
+                            ></span>
+                        </div>
+
+                        <div class="spell-selection-container">
+                            <div class="spell-group">
+                                <img
+                                    id="spell1-image"
+                                    src="./images/no_icon.webp"
+                                    alt="Spell 1"
+                                />
+                                <select id="spell1-dropdown"></select>
+                            </div>
+                            <div class="spell-separator">+</div>
+                            <div class="spell-group">
+                                <img
+                                    id="spell2-image"
+                                    src="./images/no_icon.webp"
+                                    alt="Spell 2"
+                                />
+                                <select id="spell2-dropdown"></select>
+                            </div>
+                        </div>
+
+                        <div class="checkbox-group">
+                            <input
+                                type="checkbox"
+                                id="spell-selection-checkbox"
+                                data-setting="spell-selection"
+                            />
+                            <label for="spell-selection-checkbox"
+                                >Spell Auto Selection</label
+                            >
+                            <span id="spell-warning-label" class="warning-label"
+                                >Both summoner spells need to be selected</span
+                            >
+                        </div>
+
+                        <div class="checkbox-group">
+                            <input
+                                type="checkbox"
+                                id="auto-accept-checkbox"
+                                data-setting="auto-accept"
+                            />
+                            <label for="auto-accept-checkbox"
+                                >Auto Accept</label
+                            >
+                        </div>
+
+                        <div class="checkbox-group">
+                            <input
+                                type="checkbox"
+                                id="pick-ban-selection-checkbox"
+                                data-setting="pick-ban-selection"
+                            />
+                            <label for="pick-ban-selection-checkbox"
+                                >Auto-Pick/Ban</label
+                            >
+                        </div>
+
+                        <div id="pick-ban-section">
+                            <h3>Picks and Bans</h3>
+                            <p>Enter champions to pick (2 max):</p>
+                            <div class="autocomplete-container">
+                                <input
+                                    type="text"
+                                    id="pick-text-input"
+                                    placeholder="Press enter to skip."
+                                    autocomplete="off"
+                                />
+                                <div
+                                    id="pick-suggestions"
+                                    class="suggestions-dropdown"
+                                ></div>
+                            </div>
+                            <span
+                                id="pick-not-found-label"
+                                class="warning-label"
+                            ></span>
+                            <p>Enter champion to ban:</p>
+                            <div class="autocomplete-container">
+                                <input
+                                    type="text"
+                                    id="ban-text-input"
+                                    placeholder="Press enter to skip."
+                                    autocomplete="off"
+                                />
+                                <div
+                                    id="ban-suggestions"
+                                    class="suggestions-dropdown"
+                                ></div>
+                            </div>
+                            <span
+                                id="ban-not-found-label"
+                                class="warning-label"
+                            ></span>
+                            <div id="current-picks"></div>
+                            <div id="current-bans"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
-        <div class="right-status">
-            <p id="update-status">Program is up to date.</p>
-            <p>v3.0.0</p>
+
+        <div class="status-footer">
+            <div class="left-status">
+                <p id="connection-status"></p>
+            </div>
+            <div class="right-status">
+                <p id="update-status">Program is up to date.</p>
+                <p>v3.0.1</p>
+            </div>
         </div>
-    </div>
 
-    <script src="preload.js"></script>
-    <script src="renderer.js"></script>
-</body>
+        <!-- About Modal -->
+        <div id="about-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>About Watcher</h2>
+                    <span class="close-button" id="close-about">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <p><strong>Version:</strong> 3.0.1</p>
+                    <p>
+                        <strong>Author:</strong>
+                        <a
+                            href="https://github.com/TacticalDeux"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            >TacticalDeux</a
+                        >
+                    </p>
+                    <p>
+                        <strong>Source Code:</strong>
+                        <a
+                            href="https://github.com/tacticaldeux/watcher"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            >tacticaldeux/watcher</a
+                        >
+                    </p>
+                    <p>
+                        A League of Legends automation tool for champion select.
+                    </p>
+                </div>
+            </div>
+        </div>
 
+        <script src="preload.js"></script>
+        <script src="renderer.js"></script>
+    </body>
 </html>

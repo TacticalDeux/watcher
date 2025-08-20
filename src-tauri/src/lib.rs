@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::env;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 use sysinfo::System;
 use tauri::async_runtime::{Mutex, RwLock};
 use tauri::{image::Image, AppHandle, Emitter, Listener, Manager};
@@ -83,39 +84,149 @@ pub struct SummonerSpellsData {
     pub array: Vec<SummonerSpell>,
 }
 
-// --- Data Loading Functions ---
-static GLOBAL_GAME_STATE: OnceLock<Arc<Mutex<GameState>>> = OnceLock::new();
-static LAST_GAME_STATE: OnceLock<Arc<Mutex<GameState>>> = OnceLock::new();
-static CHAMPION_AVAILABILITY_CACHE: OnceLock<Arc<Mutex<HashMap<u32, (bool, u64)>>>> =
-    OnceLock::new();
-
-fn get_global_game_state() -> &'static Arc<Mutex<GameState>> {
-    GLOBAL_GAME_STATE.get_or_init(|| Arc::new(Mutex::new(GameState::default())))
+// Centralized application state
+pub struct AppState {
+    game_state: Arc<RwLock<GameState>>,
+    last_game_state: Arc<RwLock<GameState>>,
+    champion_cache: Arc<RwLock<ChampionCache>>,
+    champions_data: Arc<OnceCell<ChampionsData>>,
+    spells_data: Arc<OnceCell<SummonerSpellsData>>,
 }
 
-fn get_last_game_state() -> &'static Arc<Mutex<GameState>> {
-    LAST_GAME_STATE.get_or_init(|| Arc::new(Mutex::new(GameState::default())))
+impl AppState {
+    pub fn new() -> Self {
+        Self {
+            game_state: Arc::new(RwLock::new(GameState::default())),
+            last_game_state: Arc::new(RwLock::new(GameState::default())),
+            champion_cache: Arc::new(RwLock::new(ChampionCache::new())),
+            champions_data: Arc::new(OnceCell::new()),
+            spells_data: Arc::new(OnceCell::new()),
+        }
+    }
+
+    pub async fn get_game_state(&self) -> tokio::sync::RwLockReadGuard<'_, GameState> {
+        self.game_state.read().await
+    }
+
+    pub async fn get_game_state_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, GameState> {
+        self.game_state.write().await
+    }
+
+    pub async fn get_last_game_state(&self) -> tokio::sync::RwLockReadGuard<'_, GameState> {
+        self.last_game_state.read().await
+    }
+
+    pub async fn get_last_game_state_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, GameState> {
+        self.last_game_state.write().await
+    }
+
+    pub async fn get_champion_cache(&self) -> tokio::sync::RwLockWriteGuard<'_, ChampionCache> {
+        self.champion_cache.write().await
+    }
+
+    pub async fn get_champions_data(&self) -> Result<&ChampionsData, String> {
+        match self.champions_data.get() {
+            Some(data) => Ok(data),
+            None => {
+                let data = load_champions_data().await?;
+                match self.champions_data.set(data) {
+                    Ok(()) => Ok(self.champions_data.get().unwrap()),
+                    Err(_) => Ok(self.champions_data.get().unwrap()), // Another thread set it
+                }
+            }
+        }
+    }
+
+    pub async fn get_summoner_spells_data(&self) -> Result<&SummonerSpellsData, String> {
+        match self.spells_data.get() {
+            Some(data) => Ok(data),
+            None => {
+                let data = load_summoner_spells_data().await?;
+                match self.spells_data.set(data) {
+                    Ok(()) => Ok(self.spells_data.get().unwrap()),
+                    Err(_) => Ok(self.spells_data.get().unwrap()), // Another thread set it
+                }
+            }
+        }
+    }
 }
 
-fn get_champion_cache() -> &'static Arc<Mutex<HashMap<u32, (bool, u64)>>> {
-    CHAMPION_AVAILABILITY_CACHE.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+// Champion availability cache
+pub struct ChampionCache {
+    cache: HashMap<u32, CacheEntry>,
+    cleanup_interval: Duration,
+    last_cleanup: Instant,
+    ttl: Duration,
 }
 
-const AVAILABILITY_CACHE_TTL: u64 = 30000;
+struct CacheEntry {
+    available: bool,
+    timestamp: Instant,
+}
 
-static CHAMPIONS_ONCE: OnceCell<ChampionsData> = OnceCell::const_new();
-static SPELLS_ONCE: OnceCell<SummonerSpellsData> = OnceCell::const_new();
+impl ChampionCache {
+    pub fn new() -> Self {
+        Self {
+            cache: HashMap::new(),
+            cleanup_interval: Duration::from_secs(60),
+            last_cleanup: Instant::now(),
+            ttl: Duration::from_millis(30000),
+        }
+    }
+
+    pub async fn get_availability(&mut self, champion_id: u32) -> Option<bool> {
+        self.cleanup_expired();
+
+        self.cache.get(&champion_id).and_then(|entry| {
+            if entry.timestamp.elapsed() < self.ttl {
+                Some(entry.available)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn set_availability(&mut self, champion_id: u32, available: bool) {
+        self.cache.insert(
+            champion_id,
+            CacheEntry {
+                available,
+                timestamp: Instant::now(),
+            },
+        );
+    }
+
+    fn cleanup_expired(&mut self) {
+        if self.last_cleanup.elapsed() > self.cleanup_interval {
+            let now = Instant::now();
+            self.cache
+                .retain(|_, entry| now.duration_since(entry.timestamp) < self.ttl);
+            self.last_cleanup = now;
+        }
+    }
+}
+
+static APP_STATE: OnceLock<AppState> = OnceLock::new();
+
+fn get_app_state() -> &'static AppState {
+    APP_STATE.get_or_init(|| AppState::new())
+}
+
+async fn update_game_state<F>(updater: F) -> GameState
+where
+    F: FnOnce(&mut GameState),
+{
+    let mut game_state = get_app_state().get_game_state_mut().await;
+    updater(&mut game_state);
+    game_state.clone()
+}
 
 pub async fn get_champions_data() -> Result<&'static ChampionsData, String> {
-    CHAMPIONS_ONCE
-        .get_or_try_init(|| async { load_champions_data().await })
-        .await
+    get_app_state().get_champions_data().await
 }
 
 pub async fn get_summoner_spells_data() -> Result<&'static SummonerSpellsData, String> {
-    SPELLS_ONCE
-        .get_or_try_init(|| async { load_summoner_spells_data().await })
-        .await
+    get_app_state().get_summoner_spells_data().await
 }
 
 async fn load_champions_data() -> Result<ChampionsData, String> {
@@ -383,21 +494,19 @@ impl LeagueClientReadiness {
 pub struct EventProcessor {
     event_rx: mpsc::UnboundedReceiver<Event>,
     app_handle: AppHandle,
-    event_tx: mpsc::UnboundedSender<ConnectionEvent>,
-    throttle_map: Arc<RwLock<HashMap<String, u64>>>,
+    throttle_map: Arc<Mutex<HashMap<String, u64>>>,
+    app_state: &'static AppState,
+    ban_completed_this_phase: Arc<Mutex<bool>>,
 }
 
 impl EventProcessor {
-    pub fn new(
-        event_rx: mpsc::UnboundedReceiver<Event>,
-        app_handle: AppHandle,
-        event_tx: mpsc::UnboundedSender<ConnectionEvent>,
-    ) -> Self {
+    pub fn new(event_rx: mpsc::UnboundedReceiver<Event>, app_handle: AppHandle) -> Self {
         Self {
             event_rx,
             app_handle,
-            event_tx,
-            throttle_map: Arc::new(RwLock::new(HashMap::new())),
+            throttle_map: Arc::new(Mutex::new(HashMap::new())),
+            app_state: get_app_state(),
+            ban_completed_this_phase: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -416,8 +525,7 @@ impl EventProcessor {
                             self.process_batch(&mut batch).await;
                         }
                     } else {
-                        // Channel closed - connection lost
-                        let _ = self.event_tx.send(ConnectionEvent::ConnectionLost);
+                        // This will be handled by the connection manager
                         break;
                     }
                 }
@@ -428,7 +536,9 @@ impl EventProcessor {
                     }
                 }
                 _ = health_check_interval.tick() => {
-                    self.check_websocket_health().await;
+                    if let Err(e) = self.check_websocket_health().await {
+                        eprintln!("WebSocket health check failed: {}", e);
+                    }
                 }
             }
         }
@@ -459,286 +569,162 @@ impl EventProcessor {
 
                 match uri {
                     uri if uri.contains("/lol-gameflow/v1/gameflow-phase") => {
-                        if let Some(phase) = event_data.get("data").and_then(|v| v.as_str()) {
-                            {
-                                let mut game_state = get_global_game_state().lock().await;
-                                match phase {
-                                    "Matchmaking" => {
-                                        game_state.gameflow_status =
-                                            "Looking for match...".to_string();
-                                        game_state.assigned_role = "".to_string();
-                                    }
-                                    "Lobby" => {
-                                        game_state.gameflow_status = "In Lobby".to_string();
-                                        game_state.assigned_role = "".to_string();
-                                    }
-                                    "ReadyCheck" => {
-                                        game_state.gameflow_status = "Match Found!".to_string();
-                                    }
-                                    "ChampSelect" => {
-                                        game_state.gameflow_status = "Champion Select".to_string();
-                                    }
-                                    "InProgress" => {
-                                        game_state.gameflow_status = "In Game".to_string();
-                                    }
-                                    "WaitingForStats" => {
-                                        game_state.gameflow_status = "Post-Game".to_string();
-                                    }
-                                    "EndOfGame" => {
-                                        game_state.gameflow_status = "Game Complete".to_string();
-                                        game_state.assigned_role = "".to_string();
-                                    }
-                                    "None" => {
-                                        game_state.gameflow_status = "Idling...".to_string();
-                                    }
-                                    _ => {
-                                        game_state.gameflow_status = phase.to_string();
-                                    }
-                                }
-                                let game_state_clone = game_state.clone();
-                                drop(game_state);
-                                update_ui(&self.app_handle, &game_state_clone).await;
-                            }
-                        }
+                        self.handle_gameflow_phase(event_data).await?;
                     }
                     uri if uri.contains("/lol-gameflow/v1/session") => {
-                        if let Some(data_obj) = event_data.get("data").and_then(|v| v.as_object()) {
-                            let phase =
-                                data_obj.get("phase").and_then(|v| v.as_str()).or_else(|| {
-                                    data_obj
-                                        .get("gameData")
-                                        .and_then(|v| v.as_object())
-                                        .and_then(|game_data| game_data.get("phase"))
-                                        .and_then(|v| v.as_str())
-                                });
-                            if let Some(phase_str) = phase {
-                                {
-                                    let mut game_state = get_global_game_state().lock().await;
-                                    match phase_str {
-                                        "Matchmaking" => {
-                                            game_state.gameflow_status =
-                                                "Looking for match...".to_string();
-                                            game_state.assigned_role = "".to_string();
-                                        }
-                                        "Lobby" => {
-                                            game_state.gameflow_status = "In Lobby".to_string();
-                                            game_state.assigned_role = "".to_string();
-                                        }
-                                        "ReadyCheck" => {
-                                            game_state.gameflow_status = "Match Found!".to_string();
-                                        }
-                                        "ChampSelect" => {
-                                            game_state.gameflow_status =
-                                                "Champion Select".to_string();
-                                        }
-                                        "InProgress" => {
-                                            game_state.gameflow_status = "In Game".to_string();
-                                        }
-                                        "WaitingForStats" => {
-                                            game_state.gameflow_status = "Post-Game".to_string();
-                                        }
-                                        "EndOfGame" => {
-                                            game_state.gameflow_status =
-                                                "Game Complete".to_string();
-                                            game_state.assigned_role = "".to_string();
-                                        }
-                                        "None" => {
-                                            game_state.gameflow_status = "Idling...".to_string();
-                                        }
-                                        _ => {
-                                            game_state.gameflow_status = phase_str.to_string();
-                                        }
-                                    }
-                                    let game_state_clone = game_state.clone();
-                                    drop(game_state);
-                                    update_ui(&self.app_handle, &game_state_clone).await;
-                                }
-                            }
-
-                            // Update role information if available
-                            if let Some(my_team) = data_obj.get("myTeam").and_then(|v| v.as_array())
-                            {
-                                if let Some(local_player_cell_id) =
-                                    data_obj.get("localPlayerCellId").and_then(|v| v.as_u64())
-                                {
-                                    if let Some(player_data) = my_team.iter().find(|player| {
-                                        player
-                                            .get("cellId")
-                                            .and_then(|v| v.as_u64())
-                                            .map_or(false, |id| id == local_player_cell_id)
-                                    }) {
-                                        if let Some(assigned_position) = player_data
-                                            .get("assignedPosition")
-                                            .and_then(|v| v.as_str())
-                                        {
-                                            {
-                                                let mut game_state =
-                                                    get_global_game_state().lock().await;
-                                                game_state.assigned_role =
-                                                    assigned_position.to_string();
-                                                let game_state_clone = game_state.clone();
-                                                drop(game_state);
-                                                update_ui(&self.app_handle, &game_state_clone)
-                                                    .await;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        self.handle_gameflow_session(event_data).await?;
                     }
                     uri if uri.contains("/lol-matchmaking/v1/ready-check") => {
-                        if let Some(data_obj) = event_data.get("data").and_then(|v| v.as_object()) {
-                            if let Some(state) = data_obj.get("state").and_then(|v| v.as_str()) {
-                                if state == "InProgress" {
-                                    let game_state = get_global_game_state().lock().await;
-                                    let should_auto_accept = game_state.settings.auto_accept;
-                                    drop(game_state);
-
-                                    if should_auto_accept {
-                                        let _ = self.auto_accept_match().await;
-                                    }
-                                }
-                            }
-                        }
+                        self.handle_ready_check(event_data).await?;
                     }
                     uri if uri.contains("/lol-champ-select/v1/session") => {
-                        if let Some(data_obj) = event_data.get("data").and_then(|v| v.as_object()) {
-                            let (
-                                should_pick_ban,
-                                should_select_spells,
-                                champion_picks,
-                                champion_ban,
-                                selected_spell1,
-                                selected_spell2,
-                            ) = {
-                                let game_state = get_global_game_state().lock().await;
-                                (
-                                    game_state.settings.pick_ban_selection,
-                                    game_state.settings.spell_selection,
-                                    game_state.settings.champion_picks.clone(),
-                                    game_state.settings.champion_ban.clone(),
-                                    game_state.settings.selected_spell1.clone(),
-                                    game_state.settings.selected_spell2.clone(),
-                                )
-                            };
-
-                            if should_pick_ban {
-                                let current_phase = data_obj
-                                    .get("timer")
-                                    .and_then(|t| t.as_object())
-                                    .and_then(|timer| timer.get("phase"))
-                                    .and_then(|p| p.as_str());
-
-                                if current_phase == Some("PLANNING") {
-                                    // Skip actions during planning phase (first ~15 seconds before banning phase)
-                                    return Ok(());
-                                }
-
-                                if let Some(actions) =
-                                    data_obj.get("actions").and_then(|v| v.as_array())
-                                {
-                                    let local_player_cell_id = data_obj
-                                        .get("localPlayerCellId")
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0);
-
-                                    // Flatten the actions array (it's nested)
-                                    for action_group in actions {
-                                        if let Some(action_array) = action_group.as_array() {
-                                            for action in action_array {
-                                                if let Some(action_obj) = action.as_object() {
-                                                    let actor_cell_id = action_obj
-                                                        .get("actorCellId")
-                                                        .and_then(|v| v.as_u64())
-                                                        .unwrap_or(0);
-
-                                                    // Only process actions for the local player
-                                                    if actor_cell_id != local_player_cell_id {
-                                                        continue;
-                                                    }
-
-                                                    let is_in_progress = action_obj
-                                                        .get("isInProgress")
-                                                        .and_then(|v| v.as_bool())
-                                                        .unwrap_or(false);
-
-                                                    let is_completed = action_obj
-                                                        .get("completed")
-                                                        .and_then(|v| v.as_bool())
-                                                        .unwrap_or(true);
-
-                                                    let action_type = action_obj
-                                                        .get("type")
-                                                        .and_then(|v| v.as_str())
-                                                        .unwrap_or("");
-
-                                                    if !is_in_progress || is_completed {
-                                                        continue;
-                                                    }
-
-                                                    match action_type {
-                                                        "ban" => {
-                                                            if let Some(champion) =
-                                                                champion_ban.as_ref()
-                                                            {
-                                                                let _ = self
-                                                                    .handle_ban(
-                                                                        serde_json::to_value(
-                                                                            action_obj,
-                                                                        )
-                                                                        .unwrap(),
-                                                                        champion.clone(),
-                                                                    )
-                                                                    .await;
-                                                            }
-                                                        }
-                                                        "pick" => {
-                                                            // Try primary pick first, then fallback picks
-                                                            for champion in &champion_picks {
-                                                                let is_available = match self
-                                                                    .is_champion_available(
-                                                                        champion.id,
-                                                                    )
-                                                                    .await
-                                                                {
-                                                                    Ok(available) => available,
-                                                                    Err(_) => continue, // Skip if we can't check availability
-                                                                };
-
-                                                                if is_available {
-                                                                    let _ = self
-                                                                        .handle_pick(
-                                                                            serde_json::to_value(
-                                                                                action_obj,
-                                                                            )
-                                                                            .unwrap(),
-                                                                            champion.clone(),
-                                                                        )
-                                                                        .await;
-                                                                    break;
-                                                                }
-                                                            }
-                                                        }
-                                                        _ => {} // Ignore other action types
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if should_select_spells
-                                && selected_spell1.is_some()
-                                && selected_spell2.is_some()
-                            {
-                                let _ = self.handle_spell_selection().await;
-                            }
-                        }
+                        self.handle_champion_select(event_data).await?;
                     }
                     _ => {
-                        // Other events
+                        // Log unhandled events for debugging if needed
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_gameflow_phase(
+        &self,
+        event_data: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), String> {
+        if let Some(phase) = event_data.get("data").and_then(|v| v.as_str()) {
+            // Reset ban flag when entering champion select
+            if phase == "ChampSelect" {
+                let mut ban_flag = self.ban_completed_this_phase.lock().await;
+                *ban_flag = false;
+            }
+
+            let game_state_clone = update_game_state(|state| match phase {
+                "Matchmaking" => {
+                    state.gameflow_status = "Looking for match...".to_string();
+                    state.assigned_role = "".to_string();
+                }
+                "Lobby" => {
+                    state.gameflow_status = "In Lobby".to_string();
+                    state.assigned_role = "".to_string();
+                }
+                "ReadyCheck" => {
+                    state.gameflow_status = "Match Found!".to_string();
+                }
+                "ChampSelect" => {
+                    state.gameflow_status = "Champion Select".to_string();
+                }
+                "InProgress" => {
+                    state.gameflow_status = "In Game".to_string();
+                }
+                "WaitingForStats" => {
+                    state.gameflow_status = "Post-Game".to_string();
+                }
+                "EndOfGame" => {
+                    state.gameflow_status = "Game Complete".to_string();
+                    state.assigned_role = "".to_string();
+                }
+                "None" => {
+                    state.gameflow_status = "Idling...".to_string();
+                }
+                _ => {
+                    state.gameflow_status = phase.to_string();
+                }
+            })
+            .await;
+
+            update_ui(&self.app_handle, &game_state_clone).await;
+        }
+        Ok(())
+    }
+
+    async fn handle_gameflow_session(
+        &self,
+        event_data: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), String> {
+        if let Some(data_obj) = event_data.get("data").and_then(|v| v.as_object()) {
+            // Handle phase changes
+            let phase = data_obj.get("phase").and_then(|v| v.as_str()).or_else(|| {
+                data_obj
+                    .get("gameData")
+                    .and_then(|v| v.as_object())
+                    .and_then(|game_data| game_data.get("phase"))
+                    .and_then(|v| v.as_str())
+            });
+
+            if let Some(phase_str) = phase {
+                // Reset ban flag when entering champion select
+                if phase_str == "ChampSelect" {
+                    let mut ban_flag = self.ban_completed_this_phase.lock().await;
+                    *ban_flag = false;
+                }
+
+                let game_state_clone = update_game_state(|state| match phase_str {
+                    "Matchmaking" => {
+                        state.gameflow_status = "Looking for match...".to_string();
+                        state.assigned_role = "".to_string();
+                    }
+                    "Lobby" => {
+                        state.gameflow_status = "In Lobby".to_string();
+                        state.assigned_role = "".to_string();
+                    }
+                    "ReadyCheck" => {
+                        state.gameflow_status = "Match Found!".to_string();
+                    }
+                    "ChampSelect" => {
+                        state.gameflow_status = "Champion Select".to_string();
+                    }
+                    "InProgress" => {
+                        state.gameflow_status = "In Game".to_string();
+                    }
+                    "WaitingForStats" => {
+                        state.gameflow_status = "Post-Game".to_string();
+                    }
+                    "EndOfGame" => {
+                        state.gameflow_status = "Game Complete".to_string();
+                        state.assigned_role = "".to_string();
+                    }
+                    "None" => {
+                        state.gameflow_status = "Idling...".to_string();
+                    }
+                    _ => {
+                        state.gameflow_status = phase_str.to_string();
+                    }
+                })
+                .await;
+
+                update_ui(&self.app_handle, &game_state_clone).await;
+            }
+
+            self.handle_role_assignment(data_obj).await?;
+        }
+        Ok(())
+    }
+
+    async fn handle_role_assignment(
+        &self,
+        data_obj: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), String> {
+        if let Some(my_team) = data_obj.get("myTeam").and_then(|v| v.as_array()) {
+            if let Some(local_player_cell_id) =
+                data_obj.get("localPlayerCellId").and_then(|v| v.as_u64())
+            {
+                if let Some(player_data) = my_team.iter().find(|player| {
+                    player
+                        .get("cellId")
+                        .and_then(|v| v.as_u64())
+                        .map_or(false, |id| id == local_player_cell_id)
+                }) {
+                    if let Some(assigned_position) =
+                        player_data.get("assignedPosition").and_then(|v| v.as_str())
+                    {
+                        let game_state_clone = update_game_state(|state| {
+                            state.assigned_role = assigned_position.to_string();
+                        })
+                        .await;
+                        update_ui(&self.app_handle, &game_state_clone).await;
                     }
                 }
             }
@@ -746,27 +732,191 @@ impl EventProcessor {
         Ok(())
     }
 
-    async fn check_websocket_health(&self) {
-        let client = match self.get_lcu_client().await {
-            Ok(client) => client,
-            Err(_) => {
-                // If we can't get the client, the connection is likely lost
-                let _ = self.event_tx.send(ConnectionEvent::ConnectionLost);
-                return;
+    async fn handle_ready_check(
+        &self,
+        event_data: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), String> {
+        if let Some(data_obj) = event_data.get("data").and_then(|v| v.as_object()) {
+            if let Some(state) = data_obj.get("state").and_then(|v| v.as_str()) {
+                if state == "InProgress" {
+                    let game_state = self.app_state.get_game_state().await;
+                    let should_auto_accept = game_state.settings.auto_accept;
+                    drop(game_state);
+
+                    if should_auto_accept {
+                        let _ = self.auto_accept_match().await;
+                    }
+                }
             }
-        };
+        }
+        Ok(())
+    }
+
+    async fn handle_champion_select(
+        &self,
+        event_data: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), String> {
+        if let Some(data_obj) = event_data.get("data").and_then(|v| v.as_object()) {
+            let (
+                should_pick_ban,
+                should_select_spells,
+                champion_picks,
+                champion_ban,
+                selected_spell1,
+                selected_spell2,
+            ) = {
+                let game_state = self.app_state.get_game_state().await;
+                (
+                    game_state.settings.pick_ban_selection,
+                    game_state.settings.spell_selection,
+                    game_state.settings.champion_picks.clone(),
+                    game_state.settings.champion_ban.clone(),
+                    game_state.settings.selected_spell1.clone(),
+                    game_state.settings.selected_spell2.clone(),
+                )
+            };
+
+            if should_pick_ban {
+                let current_phase = data_obj
+                    .get("timer")
+                    .and_then(|t| t.as_object())
+                    .and_then(|timer| timer.get("phase"))
+                    .and_then(|p| p.as_str());
+
+                if current_phase == Some("PLANNING") {
+                    // Skip actions during planning phase (first ~15 seconds before banning phase)
+                    return Ok(());
+                }
+
+                if let Some(actions) = data_obj.get("actions").and_then(|v| v.as_array()) {
+                    self.process_champion_select_actions(
+                        actions,
+                        data_obj,
+                        &champion_picks,
+                        &champion_ban,
+                    )
+                    .await?;
+                }
+            }
+
+            if should_select_spells && selected_spell1.is_some() && selected_spell2.is_some() {
+                let _ = self.handle_spell_selection().await;
+            }
+        }
+        Ok(())
+    }
+
+    async fn process_champion_select_actions(
+        &self,
+        actions: &Vec<serde_json::Value>,
+        data_obj: &serde_json::Map<String, serde_json::Value>,
+        champion_picks: &Vec<Champion>,
+        champion_ban: &Option<Champion>,
+    ) -> Result<(), String> {
+        let local_player_cell_id = data_obj
+            .get("localPlayerCellId")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        // Flatten the actions array (it's nested)
+        for action_group in actions {
+            if let Some(action_array) = action_group.as_array() {
+                for action in action_array {
+                    if let Some(action_obj) = action.as_object() {
+                        let actor_cell_id = action_obj
+                            .get("actorCellId")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+
+                        // Only process actions for the current user
+                        if actor_cell_id != local_player_cell_id {
+                            continue;
+                        }
+
+                        let is_in_progress = action_obj
+                            .get("isInProgress")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+
+                        let is_completed = action_obj
+                            .get("completed")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true);
+
+                        let action_type = action_obj
+                            .get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+
+                        if !is_in_progress || is_completed {
+                            continue;
+                        }
+
+                        match action_type {
+                            "ban" => {
+                                if let Some(champion) = champion_ban.as_ref() {
+                                    // Check if we haven't already banned this phase
+                                    let can_ban = {
+                                        let ban_flag = self.ban_completed_this_phase.lock().await;
+                                        !*ban_flag
+                                    };
+
+                                    if can_ban {
+                                        let _ = self
+                                            .handle_ban(
+                                                serde_json::to_value(action_obj).unwrap(),
+                                                champion.clone(),
+                                            )
+                                            .await;
+                                    }
+                                }
+                            }
+                            "pick" => {
+                                // Try primary pick first, then fallback picks
+                                for champion in champion_picks {
+                                    let is_available =
+                                        match self.is_champion_available(champion.id).await {
+                                            Ok(available) => available,
+                                            Err(_) => continue, // Skip if we can't check availability
+                                        };
+
+                                    if is_available {
+                                        let _ = self
+                                            .handle_pick(
+                                                serde_json::to_value(action_obj).unwrap(),
+                                                champion.clone(),
+                                            )
+                                            .await;
+                                        break;
+                                    }
+                                }
+                            }
+                            _ => {} // Ignore other action types
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn check_websocket_health(&self) -> Result<(), String> {
+        let client = self
+            .get_lcu_client()
+            .await
+            .map_err(|e| format!("Failed to get LCU client: {}", e))?;
 
         // Try a simple request to check if the connection is still alive
-        if let Err(_) = timeout(Duration::from_secs(2), async {
+        timeout(Duration::from_secs(2), async {
             client
                 .get::<serde_json::Value>("/lol-summoner/v1/current-summoner")
                 .await
         })
         .await
-        {
-            // Connection is likely dead
-            let _ = self.event_tx.send(ConnectionEvent::ConnectionLost);
-        }
+        .map_err(|_| "Health check timeout".to_string())?
+        .map_err(|e| format!("Health check failed: {}", e))?;
+
+        Ok(())
     }
 
     async fn auto_accept_match(&self) -> Result<(), String> {
@@ -902,7 +1052,11 @@ impl EventProcessor {
             .await
         {
             Ok(_) => {
-                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await; // Sleeping until banning phase over
+                // Mark ban as completed for this phase
+                {
+                    let mut ban_flag = self.ban_completed_this_phase.lock().await;
+                    *ban_flag = true;
+                }
                 Ok(())
             }
             Err(e) => Err(format!("Ban failed for {}: {}", champion_ban.name, e)),
@@ -911,7 +1065,7 @@ impl EventProcessor {
 
     async fn handle_spell_selection(&self) -> Result<(), String> {
         let (selected_spell1_name, selected_spell2_name) = {
-            let game_state_guard = get_global_game_state().lock().await;
+            let game_state_guard = self.app_state.get_game_state().await;
             (
                 game_state_guard.settings.selected_spell1.clone(),
                 game_state_guard.settings.selected_spell2.clone(),
@@ -945,13 +1099,11 @@ impl EventProcessor {
     }
 
     async fn is_champion_available(&self, champion_id: u32) -> Result<bool, String> {
-        let now = Utc::now().timestamp_millis() as u64;
-        let mut cache = get_champion_cache().lock().await;
+        let mut cache = self.app_state.get_champion_cache().await;
 
-        if let Some((available, timestamp)) = cache.get(&champion_id) {
-            if now - timestamp < AVAILABILITY_CACHE_TTL {
-                return Ok(*available);
-            }
+        // Check cache first
+        if let Some(available) = cache.get_availability(champion_id).await {
+            return Ok(available);
         }
 
         let client = self.get_lcu_client().await?;
@@ -969,11 +1121,7 @@ impl EventProcessor {
                     .and_then(|v| v.as_bool())
                     .map_or(true, |b| !b);
 
-                cache.insert(champion_id, (is_available, now));
-                if cache.len() > 50 {
-                    let cutoff = now - AVAILABILITY_CACHE_TTL * 2;
-                    cache.retain(|_, &mut (_, timestamp)| timestamp > cutoff);
-                }
+                cache.set_availability(champion_id, is_available);
 
                 Ok(is_available)
             }
@@ -995,7 +1143,7 @@ impl EventProcessor {
 
         // Read lock first
         {
-            let throttle_map = self.throttle_map.read().await;
+            let throttle_map = self.throttle_map.lock().await;
             if let Some(&last_processed) = throttle_map.get(&key) {
                 if now - last_processed < 300 {
                     return false;
@@ -1004,12 +1152,12 @@ impl EventProcessor {
         }
 
         // Write lock to update
-        let mut throttle_map = self.throttle_map.write().await;
+        let mut throttle_map = self.throttle_map.lock().await;
         throttle_map.insert(key, now);
 
         // Cleanup old entries periodically
         if throttle_map.len() > 100 {
-            let cutoff = now - 60000; // 1 minute
+            let cutoff = now - 60000;
             throttle_map.retain(|_, &mut timestamp| timestamp > cutoff);
         }
 
@@ -1038,43 +1186,12 @@ pub struct ConnectionManager {
     event_task: Arc<Mutex<Option<tauri::async_runtime::JoinHandle<()>>>>,
     monitor_task: Arc<Mutex<Option<tauri::async_runtime::JoinHandle<()>>>>,
 
-    // Configuration
-    max_connection_attempts: u32,
-    connection_timeout: Duration,
-
     // Rate limiting for connection attempts
     last_connection_attempt: Arc<AtomicU64>,
     connection_attempt_cooldown: Duration,
 
     // League Client readiness for connection attempts
     client_readiness: LeagueClientReadiness,
-}
-
-impl Clone for ConnectionManager {
-    fn clone(&self) -> Self {
-        let (_tx, rx) = mpsc::unbounded_channel();
-
-        // Clone the existing sender to maintain communication with existing instances
-        let internal_event_tx = self.internal_event_tx.clone();
-
-        ConnectionManager {
-            connection_state: self.connection_state.clone(),
-            lcu_client: self.lcu_client.clone(),
-            lcu_websocket: self.lcu_websocket.clone(),
-            internal_event_tx,
-            internal_event_rx: Arc::new(Mutex::new(rx)),
-            connection_health: self.connection_health.clone(),
-            process_monitor: self.process_monitor.clone(),
-            connection_task: Arc::new(Mutex::new(None)),
-            event_task: Arc::new(Mutex::new(None)),
-            monitor_task: Arc::new(Mutex::new(None)),
-            max_connection_attempts: self.max_connection_attempts,
-            connection_timeout: self.connection_timeout,
-            last_connection_attempt: self.last_connection_attempt.clone(),
-            connection_attempt_cooldown: self.connection_attempt_cooldown.clone(),
-            client_readiness: self.client_readiness.clone(),
-        }
-    }
 }
 
 impl ConnectionManager {
@@ -1092,8 +1209,6 @@ impl ConnectionManager {
             connection_task: Arc::new(Mutex::new(None)),
             event_task: Arc::new(Mutex::new(None)),
             monitor_task: Arc::new(Mutex::new(None)),
-            max_connection_attempts: 5,
-            connection_timeout: Duration::from_secs(10),
             last_connection_attempt: Arc::new(AtomicU64::new(0)),
             connection_attempt_cooldown: Duration::from_secs(5),
             client_readiness: LeagueClientReadiness::new(),
@@ -1127,17 +1242,16 @@ impl ConnectionManager {
 
                 // Update global game state with League process status
                 {
-                    let mut game_state = get_global_game_state().lock().await;
-                    game_state.is_league_running = is_league_running;
+                    let game_state_clone = update_game_state(|state| {
+                        state.is_league_running = is_league_running;
+                        if !is_league_running {
+                            state.connection_status = "League Client not running".to_string();
+                            state.gameflow_status = "Waiting for League Client...".to_string();
+                            state.assigned_role = "".to_string();
+                        }
+                    })
+                    .await;
 
-                    if !is_league_running {
-                        game_state.connection_status = "League Client not running".to_string();
-                        game_state.gameflow_status = "Waiting for League Client...".to_string();
-                        game_state.assigned_role = "".to_string();
-                    }
-
-                    let game_state_clone = game_state.clone();
-                    drop(game_state);
                     update_ui(&app_handle_clone, &game_state_clone).await;
                 }
 
@@ -1182,10 +1296,11 @@ impl ConnectionManager {
                         if !client_readiness.check_readiness().await {
                             // Update UI to show we're waiting for client to be ready
                             {
-                                let mut game_state = get_global_game_state().lock().await;
-                                game_state.connection_status = "Waiting to connect...".to_string();
-                                let game_state_clone = game_state.clone();
-                                drop(game_state);
+                                let game_state_clone = update_game_state(|state| {
+                                    state.connection_status = "Waiting to connect...".to_string();
+                                })
+                                .await;
+
                                 update_ui(&app_handle_clone, &game_state_clone).await;
                             }
                             sleep(Duration::from_millis(500)).await;
@@ -1249,10 +1364,11 @@ impl ConnectionManager {
                                     let _ = internal_event_tx.send(ConnectionEvent::ConnectionLost);
                                 }
                             } else {
-                                let mut game_state = get_global_game_state().lock().await;
-                                game_state.connection_status = "Connected".to_string();
-                                let game_state_clone = game_state.clone();
-                                drop(game_state);
+                                let game_state_clone = update_game_state(|state| {
+                                    state.connection_status = "Connected".to_string();
+                                })
+                                .await;
+
                                 update_ui(&app_handle_clone, &game_state_clone).await;
                                 connection_health.mark_success();
                             }
@@ -1274,62 +1390,53 @@ impl ConnectionManager {
             while let Some(event) = event_rx.recv().await {
                 match event {
                     ConnectionEvent::LeagueProcessDetected => {
-                        // Update UI - League detected
-                        {
-                            let mut game_state = get_global_game_state().lock().await;
-                            game_state.is_league_running = true;
-                            game_state.connection_status = "League Client detected".to_string();
-                            let game_state_clone = game_state.clone();
-                            drop(game_state);
-                            update_ui(&app_handle_clone, &game_state_clone).await;
-                        }
+                        let game_state_clone = update_game_state(|state| {
+                            state.is_league_running = true;
+                            state.connection_status = "League Client detected".to_string();
+                        })
+                        .await;
+                        update_ui(&app_handle_clone, &game_state_clone).await;
                     }
                     ConnectionEvent::LeagueProcessLost => {
-                        // Update UI - League lost
-                        {
-                            let mut game_state = get_global_game_state().lock().await;
-                            game_state.is_league_running = false;
-                            game_state.connection_status = "League Client not running".to_string();
-                            game_state.gameflow_status = "Waiting for League Client...".to_string();
-                            game_state.assigned_role = "".to_string();
-                            let game_state_clone = game_state.clone();
-                            drop(game_state);
-                            update_ui(&app_handle_clone, &game_state_clone).await;
-                        }
-                        Self::cleanup_connection_resources().await;
+                        let game_state_clone = update_game_state(|state| {
+                            state.is_league_running = false;
+                            state.connection_status = "League Client not running".to_string();
+                            state.gameflow_status = "Waiting for League Client...".to_string();
+                            state.assigned_role = "".to_string();
+                        })
+                        .await;
+                        update_ui(&app_handle_clone, &game_state_clone).await;
+
+                        // Connection cleanup will be handled by the main connection manager
                     }
                     ConnectionEvent::ConnectionEstablished => {
-                        // Update UI - Connected
-                        {
-                            let mut game_state = get_global_game_state().lock().await;
-                            game_state.connection_status = "Connected".to_string();
-                            let game_state_clone = game_state.clone();
-                            drop(game_state);
-                            update_ui(&app_handle_clone, &game_state_clone).await;
-                        }
+                        let game_state_clone = update_game_state(|state| {
+                            state.connection_status = "Connected".to_string();
+                        })
+                        .await;
+                        update_ui(&app_handle_clone, &game_state_clone).await;
                     }
                     ConnectionEvent::ConnectionLost => {
-                        // Update UI - Connection lost
-                        {
-                            let mut game_state = get_global_game_state().lock().await;
-                            game_state.connection_status = "Connection lost - retrying".to_string();
-                            game_state.gameflow_status = "Waiting for League Client...".to_string();
-                            game_state.assigned_role = "".to_string();
-                            let game_state_clone = game_state.clone();
-                            drop(game_state);
-                            update_ui(&app_handle_clone, &game_state_clone).await;
-                        }
-                        Self::cleanup_connection_resources().await;
+                        let game_state_clone = update_game_state(|state| {
+                            state.connection_status = "Connection lost - retrying".to_string();
+                            state.gameflow_status = "Waiting for League Client...".to_string();
+                            state.assigned_role = "".to_string();
+                        })
+                        .await;
+                        update_ui(&app_handle_clone, &game_state_clone).await;
+
+                        // Connection cleanup will be handled by the main connection manager
                     }
                     ConnectionEvent::HealthCheckFailed => {
                         // TODO: Handle health check failure
                     }
                     ConnectionEvent::ReconnectRequested => {
-                        // TODO: Handle manual reconnect request
+                        // TODO: Handle reconnect request
                     }
                 }
             }
         });
+
         *self.event_task.lock().await = Some(task);
     }
 
@@ -1361,19 +1468,21 @@ impl ConnectionManager {
     async fn attempt_single_connection(
         lcu_client: Arc<RwLock<Option<LcuClient<RequestClientType>>>>,
         lcu_websocket: Arc<RwLock<Option<(LcuWebSocket, Arc<AtomicBool>)>>>,
-        event_tx: mpsc::UnboundedSender<ConnectionEvent>,
+        _event_tx: mpsc::UnboundedSender<ConnectionEvent>,
         app_handle: AppHandle,
     ) -> Result<(), String> {
         // Clean up any existing connections first
         {
-            let mut client_guard = lcu_client.write().await;
-            *client_guard = None;
+            let mut ws_guard = lcu_websocket.write().await;
+            if let Some((ws, is_active)) = ws_guard.take() {
+                // Stop the WebSocket event processing and abort connection
+                is_active.store(false, Ordering::Relaxed);
+                let _ = ws.abort();
+            }
         }
         {
-            let mut ws_guard = lcu_websocket.write().await;
-            if let Some((_, is_active)) = ws_guard.take() {
-                is_active.store(false, Ordering::Relaxed);
-            }
+            let mut client_guard = lcu_client.write().await;
+            *client_guard = None;
         }
 
         // Attempt to connect to LCU with retries
@@ -1409,8 +1518,7 @@ impl ConnectionManager {
         }
 
         // Start event processor
-        let mut event_processor =
-            EventProcessor::new(ws_event_rx, app_handle.clone(), event_tx.clone());
+        let mut event_processor = EventProcessor::new(ws_event_rx, app_handle.clone());
         tauri::async_runtime::spawn(async move {
             event_processor.run().await;
         });
@@ -1479,10 +1587,32 @@ impl ConnectionManager {
         Ok(())
     }
 
-    async fn cleanup_connection_resources() {
+    /// Cleans up all connection resources including WebSocket and HTTP clients
+    ///
+    /// This method properly terminates WebSocket connections using the .abort() method
+    /// which ensures immediate cleanup of underlying resources and event handlers.
+    async fn cleanup_connection_resources(&self) {
+        // Clean up WebSocket connection using abort() for immediate termination
+        {
+            let mut ws_guard = self.lcu_websocket.write().await;
+            if let Some((ws, is_active)) = ws_guard.take() {
+                // Stop the WebSocket event processing
+                is_active.store(false, Ordering::Relaxed);
+                // Use abort() to immediately terminate the WebSocket connection
+                // This cleans up internal event loops and closes the connection gracefully
+                let _ = ws.abort();
+            }
+        }
+
+        // Clean up HTTP client
+        {
+            let mut client_guard = self.lcu_client.write().await;
+            *client_guard = None;
+        }
+
         // Update the global game state to reflect disconnection
         {
-            let mut game_state = get_global_game_state().lock().await;
+            let mut game_state = get_app_state().get_game_state_mut().await;
             game_state.is_league_running = false;
             game_state.connection_status = "League Client not running".to_string();
             game_state.gameflow_status = "Waiting for League Client...".to_string();
@@ -1490,8 +1620,8 @@ impl ConnectionManager {
         }
 
         // Clear any cached data that might be stale
-        let mut champion_cache = get_champion_cache().lock().await;
-        champion_cache.clear();
+        let mut champion_cache = get_app_state().get_champion_cache().await;
+        champion_cache.cache.clear();
         drop(champion_cache);
     }
 
@@ -1518,41 +1648,39 @@ impl ConnectionManager {
             Ok(Ok(response)) => {
                 if let Some(phase) = response.as_str() {
                     {
-                        let mut game_state = get_global_game_state().lock().await;
-                        match phase {
+                        let game_state_clone = update_game_state(|state| match phase {
                             "Matchmaking" => {
-                                game_state.gameflow_status = "Looking for match...".to_string();
-                                game_state.assigned_role = "".to_string();
+                                state.gameflow_status = "Looking for match...".to_string();
+                                state.assigned_role = "".to_string();
                             }
                             "Lobby" => {
-                                game_state.gameflow_status = "In Lobby".to_string();
-                                game_state.assigned_role = "".to_string();
+                                state.gameflow_status = "In Lobby".to_string();
+                                state.assigned_role = "".to_string();
                             }
                             "ReadyCheck" => {
-                                game_state.gameflow_status = "Match Found!".to_string();
+                                state.gameflow_status = "Match Found!".to_string();
                             }
                             "ChampSelect" => {
-                                game_state.gameflow_status = "Champion Select".to_string();
+                                state.gameflow_status = "Champion Select".to_string();
                             }
                             "InProgress" => {
-                                game_state.gameflow_status = "In Game".to_string();
+                                state.gameflow_status = "In Game".to_string();
                             }
                             "WaitingForStats" => {
-                                game_state.gameflow_status = "Post-Game".to_string();
+                                state.gameflow_status = "Post-Game".to_string();
                             }
                             "EndOfGame" => {
-                                game_state.gameflow_status = "Game Complete".to_string();
-                                game_state.assigned_role = "".to_string();
+                                state.gameflow_status = "Game Complete".to_string();
+                                state.assigned_role = "".to_string();
                             }
                             "None" => {
-                                game_state.gameflow_status = "Idling...".to_string();
+                                state.gameflow_status = "Idling...".to_string();
                             }
                             _ => {
-                                game_state.gameflow_status = phase.to_string();
+                                state.gameflow_status = phase.to_string();
                             }
-                        }
-                        let game_state_clone = game_state.clone();
-                        drop(game_state);
+                        })
+                        .await;
                         update_ui(&app_handle, &game_state_clone).await;
                     }
                 }
@@ -1590,10 +1718,10 @@ impl ConnectionManager {
                                     player_data.get("assignedPosition").and_then(|v| v.as_str())
                                 {
                                     {
-                                        let mut game_state = get_global_game_state().lock().await;
-                                        game_state.assigned_role = assigned_position.to_string();
-                                        let game_state_clone = game_state.clone();
-                                        drop(game_state);
+                                        let game_state_clone = update_game_state(|state| {
+                                            state.assigned_role = assigned_position.to_string();
+                                        })
+                                        .await;
                                         update_ui(&app_handle, &game_state_clone).await;
                                     }
                                 }
@@ -1635,8 +1763,12 @@ impl ConnectionManager {
         client_guard.as_ref().cloned()
     }
 
+    /// Gracefully shuts down the ConnectionManager
+    ///
+    /// Cancels all background tasks and properly terminates WebSocket connections
+    /// using the abort() method for immediate resource cleanup.
     pub async fn shutdown(&self) {
-        // Cancel all tasks
+        // Cancel all background tasks
         if let Some(task) = self.connection_task.lock().await.take() {
             task.abort();
         }
@@ -1647,22 +1779,67 @@ impl ConnectionManager {
             task.abort();
         }
 
-        // Clean up connections
+        // Clean up WebSocket connections using abort() for proper termination
+        {
+            let mut ws_guard = self.lcu_websocket.write().await;
+            if let Some((ws, is_active)) = ws_guard.take() {
+                // Stop the WebSocket event processing
+                is_active.store(false, Ordering::Relaxed);
+                // LcuWebSocket.abort() ensures immediate termination and cleanup
+                let _ = ws.abort();
+            }
+        }
         {
             let mut client_guard = self.lcu_client.write().await;
             *client_guard = None;
         }
-        {
-            let mut ws_guard = self.lcu_websocket.write().await;
-            if let Some((_, is_active)) = ws_guard.take() {
-                is_active.store(false, Ordering::Relaxed);
-            }
-        }
+
+        // Clean up application state
+        self.cleanup_connection_resources().await;
     }
 
     // Add a method to check if League is running (for external calls)
     pub async fn check_league_process(&self) -> bool {
         self.process_monitor.is_league_running().await
+    }
+}
+
+impl Drop for ConnectionManager {
+    /// Ensures cleanup even if shutdown() wasn't called explicitly
+    ///
+    /// Uses try_lock variants to avoid blocking in the destructor context
+    /// and properly aborts WebSocket connections for resource cleanup.
+    fn drop(&mut self) {
+        // Abort all background tasks
+        if let Ok(mut task_guard) = self.connection_task.try_lock() {
+            if let Some(task) = task_guard.take() {
+                task.abort();
+            }
+        }
+        if let Ok(mut task_guard) = self.event_task.try_lock() {
+            if let Some(task) = task_guard.take() {
+                task.abort();
+            }
+        }
+        if let Ok(mut task_guard) = self.monitor_task.try_lock() {
+            if let Some(task) = task_guard.take() {
+                task.abort();
+            }
+        }
+
+        // Clean up WebSocket connection using abort() for proper resource cleanup
+        if let Ok(mut ws_guard) = self.lcu_websocket.try_write() {
+            if let Some((ws, is_active)) = ws_guard.take() {
+                is_active.store(false, Ordering::Relaxed);
+                // Abort WebSocket to ensure immediate cleanup even during shutdown
+                let _ = ws.abort();
+            }
+        }
+
+        // Clean up HTTP client
+        if let Ok(mut client_guard) = self.lcu_client.try_write() {
+            *client_guard = None;
+        }
     }
 }
 
@@ -1687,14 +1864,14 @@ async fn get_champions_and_spells() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 async fn get_current_game_state() -> Result<GameState, String> {
-    let game_state = get_global_game_state().lock().await.clone();
+    let game_state = get_app_state().get_game_state().await.clone();
     Ok(game_state)
 }
 
 #[tauri::command]
 async fn clear_picks_bans(app_handle: AppHandle) -> Result<(), String> {
     let game_state_clone = {
-        let mut game_state = get_global_game_state().lock().await;
+        let mut game_state = get_app_state().get_game_state_mut().await;
         game_state.settings.champion_picks.clear();
         game_state.settings.champion_ban = None;
         game_state.clone()
@@ -1706,7 +1883,7 @@ async fn clear_picks_bans(app_handle: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn update_checkbox(app_handle: AppHandle, id: String, checked: bool) -> Result<(), String> {
     let game_state_clone = {
-        let mut game_state = get_global_game_state().lock().await;
+        let mut game_state = get_app_state().get_game_state_mut().await;
         match id.as_str() {
             "auto-accept" => {
                 game_state.settings.auto_accept = checked;
@@ -1719,7 +1896,7 @@ async fn update_checkbox(app_handle: AppHandle, id: String, checked: bool) -> Re
             "spell-selection" => {
                 game_state.settings.spell_selection = checked;
             }
-            _ => {}
+            _ => return Err(format!("Unknown checkbox ID: {}", id)),
         }
         game_state.clone()
     };
@@ -1748,7 +1925,7 @@ async fn update_pick_ban_text(
         .cloned();
     if let Some(champion) = champion {
         let game_state_clone = {
-            let mut game_state = get_global_game_state().lock().await;
+            let mut game_state = get_app_state().get_game_state_mut().await;
             if r#type == "pick" {
                 let already_exists = game_state
                     .settings
@@ -1794,7 +1971,7 @@ async fn update_selected_spell(
         return Ok(());
     }
     let game_state_clone = {
-        let mut game_state = get_global_game_state().lock().await;
+        let mut game_state = get_app_state().get_game_state_mut().await;
         if spell_slot == 1 {
             game_state.settings.selected_spell1 = Some(spell_name);
         } else {
@@ -1809,7 +1986,7 @@ async fn update_selected_spell(
 #[tauri::command]
 async fn remove_champion_pick(app_handle: AppHandle, index: usize) -> Result<(), String> {
     let game_state_clone = {
-        let mut game_state = get_global_game_state().lock().await;
+        let mut game_state = get_app_state().get_game_state_mut().await;
         if index < game_state.settings.champion_picks.len() {
             game_state.settings.champion_picks.remove(index);
             game_state.clone()
@@ -1827,7 +2004,7 @@ async fn reorder_champion_picks(
     new_order: Vec<usize>,
 ) -> Result<(), String> {
     let game_state_clone = {
-        let mut game_state = get_global_game_state().lock().await;
+        let mut game_state = get_app_state().get_game_state_mut().await;
         let current_picks_len = game_state.settings.champion_picks.len();
         if new_order.len() != current_picks_len
             || new_order.iter().any(|&idx| idx >= current_picks_len)
@@ -1896,30 +2073,30 @@ pub async fn update_ui(app_handle: &AppHandle, current_game_state: &GameState) {
     // Update the main window
     if let Some(window) = app_handle.get_webview_window("main") {
         {
-            let mut last_game_state = get_last_game_state().lock().await;
+            let mut last_state = get_app_state().get_last_game_state_mut().await;
             let mut changes = serde_json::Map::new();
-            if current_game_state.is_league_running != last_game_state.is_league_running {
+            if current_game_state.is_league_running != last_state.is_league_running {
                 changes.insert(
                     "isLeagueRunning".to_string(),
                     serde_json::to_value(current_game_state.is_league_running).unwrap(),
                 );
             }
 
-            if current_game_state.connection_status != last_game_state.connection_status {
+            if current_game_state.connection_status != last_state.connection_status {
                 changes.insert(
                     "connectionStatus".to_string(),
                     serde_json::to_value(&current_game_state.connection_status).unwrap(),
                 );
             }
 
-            if current_game_state.gameflow_status != last_game_state.gameflow_status {
+            if current_game_state.gameflow_status != last_state.gameflow_status {
                 changes.insert(
                     "gameflowStatus".to_string(),
                     serde_json::to_value(&current_game_state.gameflow_status).unwrap(),
                 );
             }
 
-            if current_game_state.assigned_role != last_game_state.assigned_role {
+            if current_game_state.assigned_role != last_state.assigned_role {
                 changes.insert(
                     "assignedRole".to_string(),
                     serde_json::to_value(&current_game_state.assigned_role).unwrap(),
@@ -1927,7 +2104,7 @@ pub async fn update_ui(app_handle: &AppHandle, current_game_state: &GameState) {
             }
 
             if serde_json::to_string(&current_game_state.settings).unwrap()
-                != serde_json::to_string(&last_game_state.settings).unwrap()
+                != serde_json::to_string(&last_state.settings).unwrap()
             {
                 changes.insert(
                     "settings".to_string(),
@@ -1938,7 +2115,7 @@ pub async fn update_ui(app_handle: &AppHandle, current_game_state: &GameState) {
             if !changes.is_empty() {
                 let _ = window.emit("status-update", changes);
             }
-            *last_game_state = current_game_state.clone();
+            *last_state = current_game_state.clone();
         }
     }
 
@@ -1996,6 +2173,7 @@ pub fn run() {
     use tauri::menu::{MenuBuilder, MenuItemBuilder};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
             let hide = MenuItemBuilder::with_id("hide", "Hide App").build(app)?;
@@ -2097,7 +2275,7 @@ pub fn run() {
             }
 
             let connection_manager = ConnectionManager::new();
-            app.manage(connection_manager.clone());
+            app.manage(connection_manager);
 
             let app_handle = app.app_handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -2109,17 +2287,20 @@ pub fn run() {
 
                 // Set initial game state
                 {
-                    let mut game_state = get_global_game_state().lock().await;
-                    game_state.is_league_running = is_league_running;
-                    if is_league_running {
-                        game_state.connection_status = "League Client detected".to_string();
-                        game_state.gameflow_status = "Connecting to League Client...".to_string();
-                    } else {
-                        game_state.connection_status = "Waiting for League Client...".to_string();
-                        game_state.gameflow_status = "Waiting for League Client...".to_string();
-                    }
-                    let initial_state = game_state.clone();
-                    drop(game_state);
+                    let initial_state = {
+                        let mut game_state = get_app_state().get_game_state_mut().await;
+                        game_state.is_league_running = is_league_running;
+                        if is_league_running {
+                            game_state.connection_status = "League Client detected".to_string();
+                            game_state.gameflow_status =
+                                "Connecting to League Client...".to_string();
+                        } else {
+                            game_state.connection_status =
+                                "Waiting for League Client...".to_string();
+                            game_state.gameflow_status = "Waiting for League Client...".to_string();
+                        }
+                        game_state.clone()
+                    };
                     update_ui(&app_handle, &initial_state).await;
                 }
 
@@ -2129,7 +2310,7 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     loop {
                         sleep(Duration::from_secs(5)).await;
-                        let current_game_state = get_global_game_state().lock().await.clone();
+                        let current_game_state = get_app_state().get_game_state().await.clone();
                         let tray_settings = TraySettings {
                             auto_accept: current_game_state.settings.auto_accept,
                             pick_ban_selection: current_game_state.settings.pick_ban_selection,
@@ -2149,12 +2330,10 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     loop {
                         sleep(Duration::from_secs(30)).await;
-                        let now = Utc::now().timestamp_millis() as u64;
-                        let mut champion_cache = get_champion_cache().lock().await;
-                        let cutoff = now - AVAILABILITY_CACHE_TTL * 2;
-                        champion_cache.retain(|_, &mut (_, timestamp)| timestamp > cutoff);
-                        if champion_cache.len() > 20 {
-                            champion_cache.clear();
+                        let mut champion_cache = get_app_state().get_champion_cache().await;
+                        champion_cache.cleanup_expired();
+                        if champion_cache.cache.len() > 100 {
+                            champion_cache.cache.clear();
                         }
                         drop(champion_cache);
                     }
