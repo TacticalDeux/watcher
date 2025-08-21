@@ -26,3 +26,7 @@ dist-ssr
 target/*
 
 .*/
+
+# Scripts
+sync-version.cjs
+version-bump.cjs

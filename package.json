@@ -1,10 +1,17 @@
 {
   "name": "watcher",
   "private": true,
-  "version": "3.0.1",
+  "version": "3.1.0",
   "type": "module",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "sync-version": "node sync-version.cjs",
+    "version:patch": "node version-bump.cjs patch",
+    "version:minor": "node version-bump.cjs minor",
+    "version:major": "node version-bump.cjs major",
+    "version:set": "node version-bump.cjs set",
+    "prebuild": "npm run sync-version",
+    "predev": "npm run sync-version"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
