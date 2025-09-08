@@ -192,3 +192,14 @@ pub async fn reorder_champion_picks(
     update_ui(&app_handle, &game_state).await;
     Ok(())
 }
+
+#[tauri::command]
+pub async fn remove_champion_ban(app_handle: AppHandle) -> Result<(), String> {
+    {
+        let mut game_state = get_app_state().get_game_state_mut().await;
+        game_state.settings.champion_ban = None;
+    }
+    let game_state = get_app_state().get_game_state().await;
+    update_ui(&app_handle, &game_state).await;
+    Ok(())
+}

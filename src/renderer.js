@@ -37,8 +37,6 @@ document.addEventListener("DOMContentLoaded", () => {
   let selectedSpell2 = null;
   let championPicks = [];
   let banPick = null;
-
-  // Pre-allocated arrays for better memory performance
   let currentPickSuggestions = new Array(8);
   let currentBanSuggestions = new Array(8);
   let pickSuggestionsCount = 0;
@@ -48,8 +46,6 @@ document.addEventListener("DOMContentLoaded", () => {
   let lastIsLeagueRunning = false;
   let currentConnectionStatus = "Starting...";
   let currentGameflowStatus = "Waiting for League Client...";
-
-  // Cache for normalized champion names (performance optimization for search)
   let normalizedChampionCache = new Map();
 
   function debounce(func, delay) {
@@ -142,19 +138,19 @@ document.addEventListener("DOMContentLoaded", () => {
     window.tauriAPI.send("update_pick_ban_text", { type: "ban", text: value });
   }, 300);
 
-  const throttledShowPickSuggestions = throttle(showPickSuggestions, 100);
-  const throttledShowBanSuggestions = throttle(showBanSuggestions, 100);
+  const debouncedShowPickSuggestions = debounce(showPickSuggestions, 150);
+  const debouncedShowBanSuggestions = debounce(showBanSuggestions, 150);
 
   const pickInputHandler = (event) => {
     const value = event.target.value;
     debouncedPickInput(value);
-    throttledShowPickSuggestions(value);
+    debouncedShowPickSuggestions(value);
   };
 
   const banInputHandler = (event) => {
     const value = event.target.value;
     debouncedBanInput(value);
-    throttledShowBanSuggestions(value);
+    debouncedShowBanSuggestions(value);
   };
 
   elements.pickTextInput.addEventListener("input", pickInputHandler, {
@@ -328,7 +324,6 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       updateSettingsSummary();
 
-      // Update tray tooltip with initial game state and settings - FIXED
       if (
         gameState.connectionStatus &&
         gameState.gameflowStatus &&
@@ -373,16 +368,16 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function setupButtonHandlers() {
-    const clearHandler = () => {
+    const clearHandler = async () => {
       // Batch all updates
       championPicks.length = 0;
       banPick = null;
       elements.pickTextInput.value = "";
       elements.banTextInput.value = "";
 
-      requestAnimationFrame(() => {
+      requestAnimationFrame(async () => {
         updatePickBanDisplay();
-        window.tauriAPI.send("clear_picks_bans");
+        await window.tauriAPI.send("clear_picks_bans");
         showTemporaryLabel(
           elements.pickBanStatus,
           "Picks and bans cleared.",
@@ -423,32 +418,30 @@ document.addEventListener("DOMContentLoaded", () => {
       { passive: true },
     );
 
-    // About button handler
     const aboutButton = document.getElementById("about-button");
     aboutButton?.addEventListener("click", showAboutModal, { passive: true });
   }
 
   function setupInputEventListeners() {
-    // Optimized focus handlers
     const pickFocusHandler = (event) => {
       const value = event.target.value.trim();
       if (value) {
-        throttledShowPickSuggestions(value);
+        debouncedShowPickSuggestions(value);
       }
     };
 
     const banFocusHandler = (event) => {
       const value = event.target.value.trim();
       if (value) {
-        throttledShowBanSuggestions(value);
+        debouncedShowBanSuggestions(value);
       }
     };
 
-    // Optimized blur handlers with cleanup
     const pickBlurHandler = () => {
       setTimeout(() => {
         hidePickSuggestions();
         debouncedPickInput.cancel();
+        debouncedShowPickSuggestions.cancel();
       }, 150);
     };
 
@@ -456,6 +449,7 @@ document.addEventListener("DOMContentLoaded", () => {
       setTimeout(() => {
         hideBanSuggestions();
         debouncedBanInput.cancel();
+        debouncedShowBanSuggestions.cancel();
       }, 150);
     };
 
@@ -480,10 +474,12 @@ document.addEventListener("DOMContentLoaded", () => {
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
+        debouncedShowPickSuggestions.cancel();
         navigatePickSuggestions(1);
         break;
       case "ArrowUp":
         event.preventDefault();
+        debouncedShowPickSuggestions.cancel();
         navigatePickSuggestions(-1);
         break;
       case "ArrowRight":
@@ -520,10 +516,12 @@ document.addEventListener("DOMContentLoaded", () => {
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
+        debouncedShowBanSuggestions.cancel();
         navigateBanSuggestions(1);
         break;
       case "ArrowUp":
         event.preventDefault();
+        debouncedShowBanSuggestions.cancel();
         navigateBanSuggestions(-1);
         break;
       case "ArrowRight":
@@ -559,6 +557,9 @@ document.addEventListener("DOMContentLoaded", () => {
   function handlePickEnter(input) {
     if (pickHighlightedIndex >= 0 && pickSuggestionsCount > 0) {
       selectPickChampion(currentPickSuggestions[pickHighlightedIndex]);
+    } else if (pickSuggestionsCount > 0) {
+      // Select first suggestion if suggestions are visible but none highlighted
+      selectPickChampion(currentPickSuggestions[0]);
     } else {
       const text = input.value.trim().toLowerCase().replace(/[ ']/g, "");
       if (text === "") {
@@ -584,6 +585,9 @@ document.addEventListener("DOMContentLoaded", () => {
   function handleBanEnter(input) {
     if (banHighlightedIndex >= 0 && banSuggestionsCount > 0) {
       selectBanChampion(currentBanSuggestions[banHighlightedIndex]);
+    } else if (banSuggestionsCount > 0) {
+      // Select first suggestion if suggestions are visible but none highlighted
+      selectBanChampion(currentBanSuggestions[0]);
     } else {
       const text = input.value.trim().toLowerCase().replace(/[ ']/g, "");
       if (text === "") {
@@ -708,7 +712,6 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // Use DocumentFragment for better performance
     const fragment = document.createDocumentFragment();
     for (let i = 0; i < count; i++) {
       const champion = suggestions[i];
@@ -786,7 +789,6 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // Use faster lookup for duplicate check
     for (let i = 0; i < championPicks.length; i++) {
       if (championPicks[i].id === champion.id) {
         showTemporaryLabel(
@@ -834,14 +836,19 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function removePickChampion(index) {
-    championPicks.splice(index, 1);
-    updatePickBanDisplay();
+  function removePickChampion(championId) {
+    const index = championPicks.findIndex((p) => p.id === championId);
+    if (index > -1) {
+      championPicks.splice(index, 1);
+      updatePickBanDisplay();
+      window.tauriAPI.send("remove_champion_pick", { championId });
+    }
   }
 
   function removeBanChampion() {
     banPick = null;
     updatePickBanDisplay();
+    window.tauriAPI.send("remove_champion_ban");
   }
 
   function updatePickBanDisplay() {
@@ -895,7 +902,7 @@ document.addEventListener("DOMContentLoaded", () => {
     removeBtn.className = "remove-btn";
     removeBtn.innerHTML = "×";
     removeBtn.title = "Remove champion";
-    removeBtn.addEventListener("click", () => removeHandler(index), {
+    removeBtn.addEventListener("click", () => removeHandler(champion.id), {
       passive: true,
     });
 
@@ -974,7 +981,6 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.spellWarningLabel.style.display = shouldShow ? "block" : "none";
   }
 
-  // Optimized temporary label with cleanup
   const activeLabelTimeouts = new Set();
 
   function showTemporaryLabel(element, message, duration) {
@@ -1013,7 +1019,6 @@ document.addEventListener("DOMContentLoaded", () => {
       element.style.display = "none";
     });
 
-    // Optimized global click handler with event delegation
     const globalClickHandler = (event) => {
       if (!event.target.closest(".autocomplete-container")) {
         hidePickSuggestions();
@@ -1030,6 +1035,8 @@ document.addEventListener("DOMContentLoaded", () => {
   function cleanup() {
     debouncedPickInput.cancel();
     debouncedBanInput.cancel();
+    debouncedShowPickSuggestions.cancel();
+    debouncedShowBanSuggestions.cancel();
 
     activeLabelTimeouts.forEach((timeoutId) => {
       clearTimeout(timeoutId);
@@ -1064,7 +1071,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const modal = document.getElementById("about-modal");
     const closeButton = document.getElementById("close-about");
 
-    // Close modal when clicking the X button
     closeButton?.addEventListener("click", hideAboutModal);
 
     // Close modal when clicking outside of it
@@ -1074,7 +1080,6 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    // Close modal with Escape key
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && modal?.style.display === "block") {
         hideAboutModal();
@@ -1117,7 +1122,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Initialize the application
   async function init() {
     setupCollapsibleSections();
     setupThemeToggle();

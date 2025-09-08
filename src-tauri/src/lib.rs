@@ -67,6 +67,7 @@ pub fn run() {
                                     let _ = window.hide();
                                 } else {
                                     let _ = window.show();
+                                    let _ = window.set_focus();
                                 }
                             }
                         }
@@ -188,6 +189,7 @@ pub fn run() {
             update_pick_ban_text,
             update_selected_spell,
             remove_champion_pick,
+            remove_champion_ban,
             reorder_champion_picks,
             hide_app,
             update_tray_tooltip,

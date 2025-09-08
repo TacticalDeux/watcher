@@ -1,4 +1,3 @@
-use crate::constants::*;
 use crate::state::get_app_state;
 use crate::structs::*;
 use irelia::ws::types::Event;
@@ -6,7 +5,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 use tauri::async_runtime::Mutex;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
@@ -80,7 +79,24 @@ impl EventProcessor {
 
                 match uri {
                     uri if uri.contains("/lol-gameflow/v1/gameflow-phase") => {
-                        self.handle_gameflow_phase(event_data).await?;
+                        // Process immediately and emit directly to UI
+                        if let Some(data) = event_data.get("data").and_then(|v| v.as_str()) {
+                            {
+                                let mut game_state = get_app_state().get_game_state_mut().await;
+                                game_state.gameflow_status = data.to_string();
+                            }
+
+                            // Direct UI emission bypassing full update cycle
+                            if let Some(window) = self.app_handle.get_webview_window("main") {
+                                let mut changes = serde_json::Map::new();
+                                changes.insert(
+                                    "gameflowStatus".to_string(),
+                                    serde_json::Value::String(data.to_string()),
+                                );
+                                let _ = window.emit("status-update", changes);
+                            }
+                        }
+                        return Ok(());
                     }
                     uri if uri.contains("/lol-gameflow/v1/session") => {
                         self.handle_gameflow_session(event_data).await?;
@@ -99,39 +115,39 @@ impl EventProcessor {
         Ok(())
     }
 
-    async fn handle_gameflow_phase(
-        &self,
-        event_data: &serde_json::Map<String, Value>,
-    ) -> Result<(), String> {
-        if let Some(data) = event_data.get("data").and_then(|v| v.as_str()) {
-            let mut game_state = get_app_state().get_game_state_mut().await;
-            let previous_phase = game_state.gameflow_status.clone();
-            game_state.gameflow_status = data.to_string();
+    // async fn handle_gameflow_phase(
+    //     &self,
+    //     event_data: &serde_json::Map<String, Value>,
+    // ) -> Result<(), String> {
+    //     if let Some(data) = event_data.get("data").and_then(|v| v.as_str()) {
+    //         let mut game_state = get_app_state().get_game_state_mut().await;
+    //         let previous_phase = game_state.gameflow_status.clone();
+    //         game_state.gameflow_status = data.to_string();
 
-            // Handle phase transitions
-            match data {
-                "ChampSelect" => {
-                    if previous_phase != "ChampSelect" {
-                        *self.ban_completed_this_phase.lock().await = false;
-                    }
-                }
-                "InProgress" => {
-                    game_state.connection_status = STATUS_IN_GAME.to_string();
-                }
-                "WaitingForStats" => {
-                    game_state.connection_status = STATUS_POST_GAME.to_string();
-                }
-                "PreEndOfGame" => {
-                    game_state.connection_status = STATUS_GAME_COMPLETE.to_string();
-                }
-                _ => {}
-            }
+    //         // Handle phase transitions
+    //         match data {
+    //             "ChampSelect" => {
+    //                 if previous_phase != "ChampSelect" {
+    //                     *self.ban_completed_this_phase.lock().await = false;
+    //                 }
+    //             }
+    //             "InProgress" => {
+    //                 // Currently unimplemented
+    //             }
+    //             "WaitingForStats" => {
+    //                 // Currently unimplemented
+    //             }
+    //             "PreEndOfGame" => {
+    //                 // Currently unimplemented
+    //             }
+    //             _ => {}
+    //         }
 
-            drop(game_state);
-            self.update_ui().await?;
-        }
-        Ok(())
-    }
+    //         drop(game_state);
+    //         self.update_ui().await?;
+    //     }
+    //     Ok(())
+    // }
 
     async fn handle_gameflow_session(
         &self,
@@ -140,17 +156,14 @@ impl EventProcessor {
         if let Some(data) = event_data.get("data").and_then(|v| v.as_object()) {
             if let Some(phase) = data.get("phase").and_then(|v| v.as_str()) {
                 let mut game_state = get_app_state().get_game_state_mut().await;
+                let previous_phase = game_state.gameflow_status.clone();
                 game_state.gameflow_status = phase.to_string();
 
                 match phase {
-                    "Matchmaking" => {
-                        game_state.connection_status = STATUS_LOOKING_FOR_MATCH.to_string();
-                    }
-                    "ReadyCheck" => {
-                        game_state.connection_status = STATUS_MATCH_FOUND.to_string();
-                    }
                     "ChampSelect" => {
-                        game_state.connection_status = STATUS_CHAMPION_SELECT.to_string();
+                        if previous_phase != "ChampSelect" {
+                            *self.ban_completed_this_phase.lock().await = false;
+                        }
                     }
                     _ => {}
                 }
@@ -364,6 +377,10 @@ impl EventProcessor {
     }
 
     async fn should_process_event(&self, uri: &str) -> bool {
+        if uri.contains("/lol-gameflow/v1/gameflow-phase") {
+            return true;
+        }
+
         let now = chrono::Utc::now().timestamp_millis() as u64;
         let mut throttle_map = self.throttle_map.lock().await;
 
