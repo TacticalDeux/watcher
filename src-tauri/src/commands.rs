@@ -1,7 +1,13 @@
 use crate::state::{get_app_state, get_champions_data, get_summoner_spells_data};
 use crate::structs::{GameState, Settings};
 use crate::ui::update_ui;
+use crate::updater;
 use tauri::AppHandle;
+
+#[tauri::command]
+pub async fn frontend_ready(app_handle: AppHandle) {
+    updater::check_for_updates(app_handle).await;
+}
 
 #[tauri::command]
 pub async fn get_champions_and_spells() -> Result<serde_json::Value, String> {

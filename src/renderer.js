@@ -17,6 +17,7 @@ document.addEventListener("DOMContentLoaded", () => {
     themeToggleButton: document.getElementById("theme-toggle"),
     themeIcon: document.getElementById("theme-icon"),
     updateButton: document.getElementById("update-button"),
+    updateStatus: document.getElementById("update-status"),
     settingsSummary: document.getElementById("settings-summary"),
     pickBanSection: document.getElementById("pick-ban-section"),
     pickSuggestions: document.getElementById("pick-suggestions"),
@@ -255,6 +256,19 @@ document.addEventListener("DOMContentLoaded", () => {
     while (!window.tauriAPI || !window.tauriAPI.ready) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
+
+    window.tauriAPI.on("update-available", (data) => {
+      elements.updateStatus.textContent = `Update available: v${data.version}`;
+      elements.updateButton.classList.remove("hidden");
+      elements.updateButton.onclick = () => {
+        elements.updateStatus.textContent = "Updating...";
+        window.tauriAPI.send("run_updater", { url: data.url });
+      };
+    });
+
+    window.tauriAPI.on("checking-for-updates", () => {
+      elements.updateStatus.textContent = "Checking for updates...";
+    });
 
     window.tauriAPI.on("status-update", (data) => {
       // Batch DOM updates
@@ -1131,6 +1145,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setupAboutModal();
     fetchAndInitializeData();
     setInitialDisplay();
+    window.tauriAPI.send("frontend_ready");
   }
 
   (async () => {

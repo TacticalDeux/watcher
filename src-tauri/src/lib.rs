@@ -5,14 +5,16 @@ mod events;
 mod state;
 mod structs;
 mod ui;
+mod updater;
 
 pub use commands::*;
 pub use constants::*;
 pub use state::{get_app_state, get_champions_data, get_summoner_spells_data};
 pub use structs::*;
 pub use ui::*;
+pub use updater::*;
 
-use tauri::{image::Image, Listener, Manager};
+use tauri::{image::Image, Emitter, Listener, Manager};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
@@ -24,12 +26,32 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
+            tauri::async_runtime::spawn(async {
+                let temp_dir = std::env::temp_dir();
+                if let Ok(mut entries) = tokio::fs::read_dir(temp_dir).await {
+                    while let Ok(Some(entry)) = entries.next_entry().await {
+                        if let Some(file_name) = entry.file_name().to_str() {
+                            if (file_name.starts_with("watcher")
+                                && file_name.ends_with("_x64-setup.exe"))
+                                || file_name == "watcher-update.exe"
+                            {
+                                let _ = tokio::fs::remove_file(entry.path()).await;
+                            }
+                        }
+                    }
+                }
+            });
+
+            let check_for_updates =
+                MenuItemBuilder::with_id("check_for_updates", "Check for Updates").build(app)?;
             let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
             let hide = MenuItemBuilder::with_id("hide", "Hide App").build(app)?;
             let show = MenuItemBuilder::with_id("show", "Show App").build(app)?;
             let tray_menu = MenuBuilder::new(app)
                 .item(&show)
                 .item(&hide)
+                .separator()
+                .item(&check_for_updates)
                 .separator()
                 .item(&quit)
                 .build()?;
@@ -42,13 +64,26 @@ pub fn run() {
                     let app_handle = app.app_handle().clone();
                     match event.id().as_ref() {
                         "quit" => {
-                            std::process::exit(0);
+                            if let Some(window) = app_handle.get_webview_window("main") {
+                                let _ = window.close();
+                            }
                         }
                         "hide" => {
                             let _ = app_handle.get_webview_window("main").map(|w| w.hide());
                         }
                         "show" => {
                             let _ = app_handle.get_webview_window("main").map(|w| w.show());
+                        }
+                        "check_for_updates" => {
+                            let app_handle_clone = app_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                app_handle_clone.emit("checking-for-updates", ()).unwrap();
+                                if let Err(e) =
+                                    updater::perform_update_check(&app_handle_clone).await
+                                {
+                                    eprintln!("Update check failed: {}", e);
+                                }
+                            });
                         }
                         _ => {}
                     }
@@ -194,7 +229,9 @@ pub fn run() {
             hide_app,
             update_tray_tooltip,
             get_champions_and_spells,
-            get_current_game_state
+            get_current_game_state,
+            run_updater,
+            frontend_ready
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
