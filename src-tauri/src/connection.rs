@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use sysinfo::System;
 use tauri::async_runtime::{Mutex, RwLock};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
 
@@ -385,6 +385,22 @@ impl ConnectionManager {
                         .await;
                         let game_state = get_app_state().get_game_state().await;
                         update_ui(&app_handle_clone, &game_state).await;
+
+                        // Now that the LCU is reachable, replace the bundled
+                        // champion fallback with the live client list (same
+                        // source LeagueAkari uses) and tell the frontend to
+                        // re-fetch so autocomplete matches the running game.
+                        let refresh_handle = app_handle_clone.clone();
+                        tauri::async_runtime::spawn(async move {
+                            match crate::state::refresh_champions_from_lcu().await {
+                                Ok(_) => {
+                                    let _ = refresh_handle.emit("champions-updated", ());
+                                }
+                                Err(e) => {
+                                    eprintln!("Live champion refresh failed: {e}");
+                                }
+                            }
+                        });
                     }
                     ConnectionEvent::ConnectionLost => {
                         update_game_state(|state| {
@@ -668,6 +684,17 @@ impl ConnectionManager {
         {
             Ok(Ok(response)) => {
                 if let Some(session_obj) = response.as_object() {
+                    // Capture the active game mode up-front so mode-specific
+                    // behaviour (e.g. the Arena Bravery pick) works even when
+                    // we connect mid champ-select and miss the first
+                    // /lol-gameflow/v1/session event.
+                    let initial_game_mode = session_obj
+                        .get("gameData")
+                        .and_then(|g| g.get("queue"))
+                        .and_then(|q| q.get("gameMode"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
                     // Update role information if available
                     if let Some(my_team) = session_obj.get("myTeam").and_then(|v| v.as_array()) {
                         if let Some(local_player_cell_id) = session_obj
@@ -694,6 +721,18 @@ impl ConnectionManager {
                                 }
                             }
                         }
+                    }
+
+                    // Apply the captured game mode regardless of whether role
+                    // data was available, so the Arena/Bravery gate is set on
+                    // connect.
+                    if let Some(game_mode) = initial_game_mode {
+                        update_game_state(|state| {
+                            state.game_mode = game_mode;
+                        })
+                        .await;
+                        let game_state = get_app_state().get_game_state().await;
+                        update_ui(&app_handle, &game_state).await;
                     }
                 }
             }

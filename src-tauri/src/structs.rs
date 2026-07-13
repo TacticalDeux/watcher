@@ -2,14 +2,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::async_runtime::RwLock;
 use tauri::AppHandle;
-use tokio::sync::{mpsc, OnceCell};
+use tokio::sync::mpsc;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Champion {
-    pub id: u32,
+    // i32 so virtual picks like Bravery (-3) can sit alongside real champion IDs.
+    pub id: i32,
     pub name: String,
 }
 
@@ -26,6 +27,9 @@ pub struct Settings {
     pub auto_accept: bool,
     #[serde(rename = "pickBanSelection")]
     pub pick_ban_selection: bool,
+    /// Arena-only "Auto Pick Bravery" toggle.
+    #[serde(rename = "autoBravery")]
+    pub auto_bravery: bool,
     #[serde(rename = "spellSelection")]
     pub spell_selection: bool,
     #[serde(rename = "selectedSpell1")]
@@ -36,6 +40,17 @@ pub struct Settings {
     pub champion_picks: Vec<Champion>,
     #[serde(rename = "championBan")]
     pub champion_ban: Option<Champion>,
+    /// Remembered close preference: true = minimize to tray, false = quit.
+    /// `None` means the user hasn't chosen yet (shows a one-time dialog).
+    /// User sets this via the "Close to Tray" checkbox in Settings.
+    #[serde(rename = "closeToTray", default, skip_serializing_if = "Option::is_none")]
+    pub close_to_tray: Option<bool>,
+    /// Whether the app should start hidden in the tray when the OS auto-launches
+    /// it at system startup. Only meaningful while "Open on System Start" is on,
+    /// so the UI shows it as an indented sub-option of that toggle. `None` means
+    /// the user hasn't chosen yet.
+    #[serde(rename = "startMinimized", default, skip_serializing_if = "Option::is_none")]
+    pub start_minimized: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -44,6 +59,9 @@ pub struct TraySettings {
     pub auto_accept: bool,
     #[serde(rename = "pickBanSelection")]
     pub pick_ban_selection: bool,
+    /// Arena-only "Auto Pick Bravery" toggle.
+    #[serde(rename = "autoBravery")]
+    pub auto_bravery: bool,
     #[serde(rename = "spellSelection")]
     pub spell_selection: bool,
 }
@@ -58,13 +76,17 @@ pub struct GameState {
     pub gameflow_status: String,
     #[serde(rename = "assignedRole")]
     pub assigned_role: String,
+    /// Internal LCU game-mode of the active session (e.g. "CHERRY" = Arena).
+    /// Drives mode-specific behaviour like the Bravery auto-pick.
+    #[serde(rename = "gameMode")]
+    pub game_mode: String,
     pub settings: Settings,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ChampionsData {
     pub name_index: HashMap<String, Champion>,
-    pub id_index: HashMap<u32, Champion>,
+    pub id_index: HashMap<i32, Champion>,
     pub array: Vec<Champion>,
 }
 
@@ -72,26 +94,6 @@ pub struct ChampionsData {
 pub struct SummonerSpellsData {
     pub name_index: HashMap<String, SummonerSpell>,
     pub array: Vec<SummonerSpell>,
-}
-
-pub struct AppState {
-    pub game_state: Arc<RwLock<GameState>>,
-    pub last_game_state: Arc<RwLock<GameState>>,
-    pub champion_cache: Arc<RwLock<ChampionCache>>,
-    pub champions_data: Arc<OnceCell<ChampionsData>>,
-    pub spells_data: Arc<OnceCell<SummonerSpellsData>>,
-}
-
-pub struct ChampionCache {
-    pub cache: HashMap<u32, CacheEntry>,
-    pub cleanup_interval: Duration,
-    pub last_cleanup: Instant,
-    pub ttl: Duration,
-}
-
-pub struct CacheEntry {
-    pub available: bool,
-    pub timestamp: Instant,
 }
 
 #[derive(Debug, Clone)]

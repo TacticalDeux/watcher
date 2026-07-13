@@ -19,6 +19,7 @@
                     <button class="dropbtn" id="file-menu-button">File</button>
                     <div class="dropdown-content" id="file-dropdown-content">
                         <a href="#" id="hide-app-button">Hide App</a>
+                        <a href="#" id="settings-button">Settings</a>
                     </div>
                 </div>
                 <button id="update-button" class="hidden">Update</button>
@@ -49,11 +50,11 @@
                     </div>
                 </div>
 
-                <!-- Settings Section -->
+                <!-- Automation Section -->
                 <div class="content-section" id="settings-section">
                     <h2 class="section-header">
                         <div class="section-title-group">
-                            <span class="section-title">Settings</span>
+                            <span class="section-title">Automation</span>
                             <span
                                 id="settings-summary"
                                 class="section-summary"
@@ -120,6 +121,17 @@
                         <div class="checkbox-group">
                             <input
                                 type="checkbox"
+                                id="auto-bravery-checkbox"
+                                data-setting="auto-bravery"
+                            />
+                            <label for="auto-bravery-checkbox"
+                                >Auto Pick Bravery (Arena)</label
+                            >
+                        </div>
+
+                        <div class="checkbox-group">
+                            <input
+                                type="checkbox"
                                 id="pick-ban-selection-checkbox"
                                 data-setting="pick-ban-selection"
                             />
@@ -178,7 +190,54 @@
             </div>
             <div class="right-status">
                 <p id="update-status">Program is up to date.</p>
-                <p>v3.1.2</p>
+                <p>v3.2.0</p>
+            </div>
+        </div>
+
+        <!-- Close Preference Dialog (shown once on first close) -->
+        <div id="close-pref-dialog" class="close-confirm-overlay">
+            <div class="close-confirm-dialog">
+                <p>Close Watcher or keep it running in the system tray?</p>
+                <div class="close-confirm-actions">
+                    <button id="close-pref-quit">Quit</button>
+                    <button id="close-pref-tray" class="primary">Minimize to Tray</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Settings</h2>
+                    <span class="close-button" id="close-settings">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="close-to-tray-checkbox" data-setting="close-to-tray" />
+                        <label for="close-to-tray-checkbox">Close to Tray</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="open-on-start-checkbox" />
+                        <label for="open-on-start-checkbox">Open on System Start</label>
+                    </div>
+                    <!-- Sub-option of "Open on System Start": only relevant while
+                         autostart is on, so it's shown indented and only when the
+                         parent toggle is checked. -->
+                    <div
+                        class="checkbox-group indented hidden"
+                        id="start-minimized-group"
+                    >
+                        <input
+                            type="checkbox"
+                            id="start-minimized-checkbox"
+                            data-setting="start-minimized"
+                        />
+                        <label for="start-minimized-checkbox"
+                            >Start Minimized to Tray</label
+                        >
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -190,7 +249,7 @@
                     <span class="close-button" id="close-about">&times;</span>
                 </div>
                 <div class="modal-body">
-                    <p><strong>Version:</strong> 3.1.2</p>
+                    <p><strong>Version:</strong> 3.2.0</p>
                     <p>
                         <strong>Author:</strong>
                         <a
@@ -210,6 +269,24 @@
                         >
                     </p>
                     <p>A League of Legends automation tool.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Update Available Modal: shown when "Check for Updates" finds a new release. -->
+        <div id="update-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Update Available</h2>
+                    <span class="close-button" id="close-update">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <p id="update-version-text"></p>
+                    <pre id="update-notes-text"></pre>
+                    <div id="update-modal-actions" class="close-confirm-actions">
+                        <button id="update-later-btn">Later</button>
+                        <button id="update-now-btn" class="primary">Update Now</button>
+                    </div>
                 </div>
             </div>
         </div>

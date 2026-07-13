@@ -16,6 +16,10 @@
       listen("status-update", (event) => callback(event.payload));
     },
 
+    onChampionsUpdated: (callback) => {
+      listen("champions-updated", (event) => callback(event.payload));
+    },
+
     clearPicksBans: () => {
       invoke("clear_picks_bans");
     },
@@ -49,9 +53,11 @@
       listen(channel, (event) => callback(event.payload));
     },
 
-    send: (channel, data) => {
-      invoke(channel, data);
+    once: (channel, callback) => {
+      listen(channel, (event) => callback(event.payload));
     },
+
+    send: (channel, data) => invoke(channel, data),
 
     openExternal: (url) => {
       return open(url);

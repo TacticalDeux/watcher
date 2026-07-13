@@ -1,5 +1,6 @@
 use crate::state::get_app_state;
 use crate::structs::*;
+use crate::constants::*;
 use irelia::ws::types::Event;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -153,25 +154,47 @@ impl EventProcessor {
         &self,
         event_data: &serde_json::Map<String, Value>,
     ) -> Result<(), String> {
-        if let Some(data) = event_data.get("data").and_then(|v| v.as_object()) {
-            if let Some(phase) = data.get("phase").and_then(|v| v.as_str()) {
-                let mut game_state = get_app_state().get_game_state_mut().await;
-                let previous_phase = game_state.gameflow_status.clone();
-                game_state.gameflow_status = phase.to_string();
+        let Some(data) = event_data.get("data").and_then(|v| v.as_object()) else {
+            return Ok(());
+        };
 
-                match phase {
-                    "ChampSelect" => {
-                        if previous_phase != "ChampSelect" {
-                            *self.ban_completed_this_phase.lock().await = false;
-                        }
-                    }
-                    _ => {}
-                }
+        let phase = data.get("phase").and_then(|v| v.as_str());
+        // gameData.queue.gameMode is the internal mode name ("CHERRY" = Arena).
+        // This is what gates the Bravery auto-pick, so capture it here.
+        let game_mode = data
+            .get("gameData")
+            .and_then(|g| g.get("queue"))
+            .and_then(|q| q.get("gameMode"))
+            .and_then(|v| v.as_str());
 
-                drop(game_state);
-                self.update_ui().await?;
-            }
+        if phase.is_none() && game_mode.is_none() {
+            return Ok(());
         }
+
+        let just_entered_champ_select;
+        {
+            let mut game_state = get_app_state().get_game_state_mut().await;
+            let previous_phase = game_state.gameflow_status.clone();
+            if let Some(phase) = phase {
+                game_state.gameflow_status = phase.to_string();
+            }
+            if let Some(game_mode) = game_mode {
+                game_state.game_mode = game_mode.to_string();
+            }
+            just_entered_champ_select =
+                phase == Some("ChampSelect") && previous_phase != "ChampSelect";
+        }
+
+        if just_entered_champ_select {
+            // A fresh champ-select phase means any ban-completed flag is stale.
+            *self.ban_completed_this_phase.lock().await = false;
+        }
+
+        // Route through the shared UI updater so the new gameMode is diffed
+        // and emitted to the frontend on "status-update".
+        let game_state = get_app_state().get_game_state().await;
+        let _ = crate::ui::update_ui(&self.app_handle, &game_state).await;
+
         Ok(())
     }
 
@@ -262,35 +285,52 @@ impl EventProcessor {
             return Ok(());
         }
 
-        let champion_picks = &game_state.settings.champion_picks;
-        if champion_picks.is_empty() {
-            return Ok(());
+        let auto_bravery = game_state.settings.auto_bravery;
+        let is_cherry = game_state.game_mode == CHERRY_GAME_MODE;
+        let champion_picks = game_state.settings.champion_picks.clone();
+        drop(game_state);
+
+        // Auto Pick Bravery overrides the normal pick list in Arena.
+        if auto_bravery && is_cherry {
+            return self
+                .pick_champion(action, BRAVERY_CHAMPION_ID)
+                .await;
         }
 
-        // Try to pick the first available champion from the list
+        // Walk the pick priority list and lock in the first available champion.
         for champion in champion_picks {
-            if self.is_champion_available(champion.id).await? {
-                if let Some(client) = self.get_lcu_client().await {
-                    let pick_data = serde_json::json!({
-                        "actorCellId": action.get("actorCellId"),
-                        "championId": champion.id,
-                        "completed": true,
-                        "id": action.get("id"),
-                        "isAllyAction": action.get("isAllyAction"),
-                        "type": "pick"
-                    });
-
-                    if let Some(action_id) = action.get("id").and_then(|v| v.as_i64()) {
-                        let endpoint =
-                            format!("/lol-champ-select/v1/session/actions/{}", action_id);
-                        let _: Result<serde_json::Value, _> =
-                            client.patch(&endpoint, Some(pick_data)).await;
-                        break;
-                    }
-                }
+            if !self.is_champion_available(champion.id).await? {
+                continue;
             }
+            return self.pick_champion(action, champion.id).await;
         }
 
+        Ok(())
+    }
+
+    async fn pick_champion(
+        &self,
+        action: &serde_json::Map<String, Value>,
+        champion_id: i32,
+    ) -> Result<(), String> {
+        let Some(client) = self.get_lcu_client().await else {
+            return Ok(());
+        };
+
+        let pick_data = serde_json::json!({
+            "actorCellId": action.get("actorCellId"),
+            "championId": champion_id,
+            "completed": true,
+            "id": action.get("id"),
+            "isAllyAction": action.get("isAllyAction"),
+            "type": "pick"
+        });
+
+        if let Some(action_id) = action.get("id").and_then(|v| v.as_i64()) {
+            let endpoint = format!("/lol-champ-select/v1/session/actions/{}", action_id);
+            let _: Result<serde_json::Value, _> =
+                client.patch(&endpoint, Some(pick_data)).await;
+        }
         Ok(())
     }
 
@@ -306,6 +346,11 @@ impl EventProcessor {
         }
 
         if let Some(ban_champion) = &game_state.settings.champion_ban {
+            // Bravery is a virtual pick that cannot be banned. If it somehow
+            // ends up as the ban target, silently skip the ban action.
+            if ban_champion.id == BRAVERY_CHAMPION_ID {
+                return Ok(());
+            }
             if let Some(client) = self.get_lcu_client().await {
                 let ban_data = serde_json::json!({
                     "actorCellId": action.get("actorCellId"),
@@ -340,7 +385,7 @@ impl EventProcessor {
         Ok(())
     }
 
-    async fn is_champion_available(&self, champion_id: u32) -> Result<bool, String> {
+    async fn is_champion_available(&self, champion_id: i32) -> Result<bool, String> {
         if let Some(client) = self.get_lcu_client().await {
             match timeout(Duration::from_secs(2), async {
                 client
@@ -351,9 +396,9 @@ impl EventProcessor {
             {
                 Ok(Ok(response)) => {
                     if let Some(pickable_ids) = response.as_array() {
-                        return Ok(pickable_ids
-                            .iter()
-                            .any(|id| id.as_u64().map(|id| id as u32) == Some(champion_id)));
+                        return Ok(pickable_ids.iter().any(|id| {
+                            id.as_i64().map(|id| id as i32) == Some(champion_id)
+                        }));
                     }
                 }
                 _ => {}
@@ -393,11 +438,5 @@ impl EventProcessor {
 
         throttle_map.insert(uri.to_string(), now);
         true
-    }
-
-    async fn update_ui(&self) -> Result<(), String> {
-        let game_state = get_app_state().get_game_state().await;
-        let _ = self.app_handle.emit("game-state-update", &*game_state);
-        Ok(())
     }
 }

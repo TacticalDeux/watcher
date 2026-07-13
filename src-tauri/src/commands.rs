@@ -3,6 +3,24 @@ use crate::structs::{GameState, Settings};
 use crate::ui::update_ui;
 use crate::updater;
 use tauri::AppHandle;
+use tauri_plugin_autostart::ManagerExt;
+
+#[tauri::command]
+pub fn get_autostart_state(app: AppHandle) -> bool {
+    let enabled = app.autolaunch().is_enabled().unwrap_or(false);
+    eprintln!("[autostart] get_autostart_state -> {enabled}");
+    enabled
+}
+
+#[tauri::command]
+pub fn toggle_autostart(enabled: bool, app: AppHandle) -> Result<(), String> {
+    eprintln!("[autostart] toggle_autostart({enabled})");
+    if enabled {
+        app.autolaunch().enable().map_err(|e| format!("Failed to enable autostart: {e}"))
+    } else {
+        app.autolaunch().disable().map_err(|e| format!("Failed to disable autostart: {e}"))
+    }
+}
 
 #[tauri::command]
 pub async fn frontend_ready(app_handle: AppHandle) {
@@ -11,19 +29,22 @@ pub async fn frontend_ready(app_handle: AppHandle) {
 
 #[tauri::command]
 pub async fn get_champions_and_spells() -> Result<serde_json::Value, String> {
-    let champions_array = match get_champions_data().await {
-        Ok(champions_data) => &champions_data.array,
+    // `get_champions_data()` now hands back a read-lock guard rather than a
+    // &'static ref (the champion list is refreshable from the LCU), so keep the
+    // guards alive in locals for the duration of the serialization.
+    let champions = match get_champions_data().await {
+        Ok(data) => data,
         Err(_) => return Ok(serde_json::json!({"champions": [], "summonerSpells": []})),
     };
 
-    let spells_array = match get_summoner_spells_data().await {
-        Ok(spells_data) => &spells_data.array,
+    let spells = match get_summoner_spells_data().await {
+        Ok(data) => data,
         Err(_) => return Ok(serde_json::json!({"champions": [], "summonerSpells": []})),
     };
 
     Ok(serde_json::json!({
-        "champions": champions_array,
-        "summonerSpells": spells_array
+        "champions": &champions.array,
+        "summonerSpells": &spells.array
     }))
 }
 
@@ -35,14 +56,18 @@ pub async fn get_current_game_state() -> Result<GameState, String> {
         connection_status: game_state.connection_status.clone(),
         gameflow_status: game_state.gameflow_status.clone(),
         assigned_role: game_state.assigned_role.clone(),
+        game_mode: game_state.game_mode.clone(),
         settings: Settings {
             auto_accept: game_state.settings.auto_accept,
             pick_ban_selection: game_state.settings.pick_ban_selection,
+            auto_bravery: game_state.settings.auto_bravery,
             spell_selection: game_state.settings.spell_selection,
             selected_spell1: game_state.settings.selected_spell1.clone(),
             selected_spell2: game_state.settings.selected_spell2.clone(),
             champion_picks: game_state.settings.champion_picks.clone(),
             champion_ban: game_state.settings.champion_ban.clone(),
+            close_to_tray: game_state.settings.close_to_tray,
+            start_minimized: game_state.settings.start_minimized,
         },
     })
 }
@@ -77,7 +102,28 @@ pub async fn update_checkbox(
             "spell-selection" => {
                 game_state.settings.spell_selection = checked;
             }
+            "auto-bravery" => {
+                game_state.settings.auto_bravery = checked;
+            }
+            "close-to-tray" => {
+                game_state.settings.close_to_tray = Some(checked);
+            }
+            "start-minimized" => {
+                game_state.settings.start_minimized = Some(checked);
+            }
             _ => return Err(format!("Unknown checkbox ID: {}", id)),
+        }
+    }
+    // When the user opts into "Start Minimized to Tray", re-write the autostart
+    // registry entry so it carries the "--autostart" launch arg. This matters for
+    // users who enabled autostart with an older build that didn't pass the arg —
+    // otherwise the OS would launch the bare exe and we couldn't detect the
+    // startup launch. Only refresh when autostart is currently enabled, so we
+    // never silently re-enable it ourselves.
+    if id == "start-minimized" && checked {
+        let manager = app_handle.autolaunch();
+        if manager.is_enabled().unwrap_or(false) {
+            let _ = manager.enable();
         }
     }
     let game_state = get_app_state().get_game_state().await;
@@ -166,7 +212,7 @@ pub async fn update_selected_spell(
 }
 
 #[tauri::command]
-pub async fn remove_champion_pick(app_handle: AppHandle, champion_id: u32) -> Result<(), String> {
+pub async fn remove_champion_pick(app_handle: AppHandle, champion_id: i32) -> Result<(), String> {
     {
         let mut game_state = get_app_state().get_game_state_mut().await;
         game_state

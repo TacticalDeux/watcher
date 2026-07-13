@@ -1,4 +1,4 @@
-use crate::state::get_app_state;
+use crate::state::{get_app_state, persist_settings};
 use crate::structs::{GameState, Settings, TraySettings};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -16,6 +16,11 @@ pub fn hide_app(app_handle: tauri::AppHandle) {
 }
 
 #[tauri::command]
+pub fn close_app(app_handle: tauri::AppHandle) {
+    app_handle.exit(0);
+}
+
+#[tauri::command]
 pub async fn update_tray_tooltip(
     app_handle: AppHandle,
     _connection_status: &str,
@@ -28,6 +33,9 @@ pub async fn update_tray_tooltip(
     }
     if settings.pick_ban_selection {
         active_settings.push("Pick/Ban");
+    }
+    if settings.auto_bravery {
+        active_settings.push("Bravery");
     }
     if settings.spell_selection {
         active_settings.push("Spells");
@@ -78,6 +86,13 @@ pub async fn update_ui(app_handle: &AppHandle, current_game_state: &GameState) {
                 );
             }
 
+            if current_game_state.game_mode != last_state.game_mode {
+                changes.insert(
+                    "gameMode".to_string(),
+                    serde_json::to_value(&current_game_state.game_mode).unwrap(),
+                );
+            }
+
             if serde_json::to_string(&current_game_state.settings).unwrap()
                 != serde_json::to_string(&last_state.settings).unwrap()
             {
@@ -85,6 +100,8 @@ pub async fn update_ui(app_handle: &AppHandle, current_game_state: &GameState) {
                     "settings".to_string(),
                     serde_json::to_value(&current_game_state.settings).unwrap(),
                 );
+                // Persist settings to disk whenever they change.
+                persist_settings(&current_game_state.settings);
             }
 
             if !changes.is_empty() {
@@ -113,6 +130,7 @@ pub async fn update_tray_tooltip_internal(
         let tray_settings = TraySettings {
             auto_accept: settings.auto_accept,
             pick_ban_selection: settings.pick_ban_selection,
+            auto_bravery: settings.auto_bravery,
             spell_selection: settings.spell_selection,
         };
 
@@ -123,6 +141,10 @@ pub async fn update_tray_tooltip_internal(
 
         if tray_settings.pick_ban_selection {
             active_settings.push("Pick/Ban");
+        }
+
+        if tray_settings.auto_bravery {
+            active_settings.push("Bravery");
         }
 
         if tray_settings.spell_selection {

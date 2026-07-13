@@ -5,6 +5,7 @@ use tauri_plugin_shell::ShellExt;
 #[derive(Debug, Deserialize)]
 struct Release {
     tag_name: String,
+    body: Option<String>,
     assets: Vec<Asset>,
 }
 
@@ -43,7 +44,8 @@ pub async fn perform_update_check(app_handle: &AppHandle) -> Result<(), anyhow::
     let latest_version_str = response.tag_name.trim_start_matches('v');
     let latest_version_semver = semver::Version::parse(latest_version_str)?;
 
-    if latest_version_semver > current_version_semver {
+    let update_available = latest_version_semver > current_version_semver;
+    if update_available {
         if let Some(asset) = response
             .assets
             .iter()
@@ -53,11 +55,16 @@ pub async fn perform_update_check(app_handle: &AppHandle) -> Result<(), anyhow::
                 "update-available",
                 serde_json::json!({
                     "version": latest_version_str,
-                    "url": asset.browser_download_url
+                    "url": asset.browser_download_url,
+                    "notes": response.body.as_deref().unwrap_or_default()
                 }),
             )?;
         }
     }
+
+    // Always emit a completion event (with or without an update) so the
+    // frontend can always clear its "Checking for updates..." indicator.
+    app_handle.emit("check-updates-complete", serde_json::json!({}))?;
 
     Ok(())
 }

@@ -232,7 +232,7 @@ body {
 .panel {
     display: block;
     background-color: var(--bg-color-card);
-    padding: var(--spacing-lg);
+    padding: var(--spacing-md);
     border-radius: var(--radius-lg);
     box-shadow: 0 2px 12px var(--shadow-light);
     border: 1px solid var(--border-color-light);
@@ -240,8 +240,8 @@ body {
 }
 
 .content-section {
-    padding-bottom: var(--spacing-lg);
-    margin-bottom: var(--spacing-lg);
+    padding-bottom: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
     border-bottom: 1px solid var(--border-color-light);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -258,8 +258,8 @@ body {
     align-items: center;
     cursor: pointer;
     user-select: none;
-    margin-bottom: var(--spacing-md);
-    padding: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+    padding: var(--spacing-xs);
     border-radius: var(--radius-md);
     transition: all 0.2s ease;
 }
@@ -277,7 +277,7 @@ body {
 .section-header .section-title {
     color: var(--text-color-primary);
     font-weight: 600;
-    font-size: 16px;
+    font-size: 14px;
     margin: 0;
 }
 
@@ -326,12 +326,12 @@ body {
 }
 
 #match-state-section p {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-color-secondary);
-    padding: var(--spacing-sm) var(--spacing-md);
+    padding: var(--spacing-xs) var(--spacing-sm);
     background-color: var(--bg-color-light);
     border-radius: var(--radius-md);
-    margin: 0 0 var(--spacing-sm);
+    margin: 0 0 var(--spacing-xs);
     border-left: 3px solid var(--accent-color);
     font-weight: 500;
 }
@@ -342,18 +342,18 @@ body {
 
 .panel h3 {
     color: var(--text-color-primary);
-    margin: var(--spacing-lg) 0 var(--spacing-md);
+    margin: var(--spacing-sm) 0 var(--spacing-xs);
     border-bottom: 1px solid var(--border-color-light);
-    padding-bottom: var(--spacing-sm);
+    padding-bottom: var(--spacing-xs);
     font-weight: 600;
-    font-size: 15px;
+    font-size: 13px;
 }
 
 .horizontal-group {
     display: flex;
     align-items: center;
-    margin-bottom: var(--spacing-md);
-    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-sm);
+    gap: var(--spacing-sm);
     flex-wrap: wrap;
 }
 
@@ -361,10 +361,10 @@ body {
     background-color: var(--button-secondary-bg);
     color: var(--text-color-primary);
     border: 1px solid var(--border-color-dark);
-    padding: var(--spacing-sm) var(--spacing-md);
+    padding: var(--spacing-xs) var(--spacing-sm);
     border-radius: var(--radius-md);
     cursor: pointer;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: 0 1px 3px var(--shadow-light);
@@ -383,10 +383,10 @@ body {
 }
 
 .checkbox-group {
-    margin-bottom: var(--spacing-md);
+    margin-bottom: var(--spacing-xs);
     display: flex;
     align-items: center;
-    padding: var(--spacing-sm);
+    padding: var(--spacing-xs);
     border-radius: var(--radius-md);
     transition: background-color 0.2s ease;
 }
@@ -397,31 +397,50 @@ body {
 
 .checkbox-group input[type="checkbox"] {
     margin-right: var(--spacing-sm);
-    transform: scale(1.1);
     accent-color: var(--accent-color);
     cursor: pointer;
 }
 
 .checkbox-group label {
-    font-size: 13px;
+    font-size: 12.5px;
     color: var(--text-color-secondary);
     font-weight: 500;
     cursor: pointer;
     flex: 1;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* Indented sub-option of another settings checkbox (e.g. "Start Minimized to
+   Tray" under "Open on System Start"). Only shown while the parent is on; the
+   generic ".hidden" class handles hiding it. */
+.checkbox-group.indented {
+    margin-left: var(--spacing-lg);
+    padding-left: var(--spacing-sm);
+    border-left: 2px solid var(--border-color-dark);
+}
+
+/* Disabled checkbox label: grayed + strikethrough. Used for Arena-only
+   toggles like Bravery when the active game mode isn't CHERRY. */
+.checkbox-group input[type="checkbox"]:disabled + label {
+    color: var(--text-color-muted);
+    text-decoration: line-through;
+    cursor: not-allowed;
+    opacity: 0.6;
 }
 
 .spell-selection-container {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: var(--spacing-md);
-    margin-bottom: var(--spacing-lg);
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
     background: linear-gradient(
         135deg,
         var(--bg-color-light) 0%,
         rgba(0, 102, 255, 0.02) 100%
     );
-    padding: var(--spacing-md);
+    padding: var(--spacing-sm);
     border-radius: var(--radius-lg);
     border: 1px solid var(--border-color-light);
     box-shadow: inset 0 1px 3px var(--shadow-light);
@@ -430,23 +449,23 @@ body {
 .spell-group {
     display: flex;
     align-items: center;
-    gap: var(--spacing-sm);
+    gap: var(--spacing-xs);
     background-color: var(--bg-color-card);
-    padding: var(--spacing-sm);
+    padding: var(--spacing-xs);
     border-radius: var(--radius-md);
     box-shadow: 0 1px 3px var(--shadow-light);
     border: 1px solid var(--border-color-light);
 }
 
 .spell-separator {
-    font-size: 18px;
+    font-size: 14px;
     color: var(--text-color-muted);
     font-weight: 600;
 }
 
 .spell-group img {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border: 2px solid var(--accent-color);
     border-radius: var(--radius-md);
     object-fit: cover;
@@ -454,10 +473,10 @@ body {
 }
 
 .spell-group select {
-    padding: var(--spacing-sm);
+    padding: 2px var(--spacing-sm);
     border-radius: var(--radius-md);
     border: 1px solid var(--input-border-color);
-    font-size: 12px;
+    font-size: 11px;
     background-color: var(--bg-color-card);
     cursor: pointer;
     color: var(--text-color-primary);
@@ -473,11 +492,11 @@ body {
 
 input[type="text"] {
     width: 100%;
-    padding: var(--spacing-sm) var(--spacing-md);
-    margin-bottom: var(--spacing-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    margin-bottom: 2px;
     border: 1px solid var(--border-color-dark);
     border-radius: var(--radius-md);
-    font-size: 13px;
+    font-size: 12px;
     box-shadow: inset 0 1px 2px var(--shadow-light);
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     background-color: var(--bg-color-card);
@@ -507,7 +526,7 @@ input[type="text"]:focus {
     border: 1px solid var(--border-color-dark);
     border-top: none;
     border-radius: 0 0 var(--radius-md) var(--radius-md);
-    max-height: 180px;
+    max-height: 132px;
     overflow-y: auto;
     z-index: 1000;
     display: none;
@@ -532,9 +551,9 @@ input[type="text"]:focus {
 }
 
 .suggestion-item {
-    padding: var(--spacing-sm) var(--spacing-md);
+    padding: 3px var(--spacing-sm);
     cursor: pointer;
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-color-primary);
     border-bottom: 1px solid var(--border-color-light);
     transition: all 0.2s ease;
@@ -575,15 +594,15 @@ input[type="text"]:focus {
 
 #pick-ban-section p {
     margin-bottom: var(--spacing-xs);
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-color-secondary);
     font-weight: 500;
 }
 
 #current-bans,
 #current-picks {
-    margin-top: var(--spacing-md);
-    padding: var(--spacing-md);
+    margin-top: var(--spacing-sm);
+    padding: var(--spacing-sm);
     background-color: var(--bg-color-light);
     border-radius: var(--radius-md);
     border: 1px solid var(--border-color-light);
@@ -595,7 +614,7 @@ input[type="text"]:focus {
     color: var(--text-color-primary);
     display: block;
     margin-bottom: var(--spacing-xs);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
 }
 
@@ -603,8 +622,8 @@ input[type="text"]:focus {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--spacing-sm);
-    margin: var(--spacing-xs) 0;
+    padding: var(--spacing-xs);
+    margin: 2px 0;
     background-color: var(--bg-color-card);
     border-radius: var(--radius-md);
     border: 1px solid var(--border-color-light);
@@ -708,20 +727,19 @@ input[type="text"]:focus {
 .warning-label {
     color: var(--warning-color);
     font-weight: 600;
-    margin-left: var(--spacing-sm);
-    font-size: 11px;
+    font-size: 10px;
     background-color: rgba(255, 71, 87, 0.1);
-    padding: 2px var(--spacing-xs);
+    padding: 1px var(--spacing-xs);
     border-radius: var(--radius-sm);
+    display: inline-block;
 }
 
 .info-label {
     color: var(--success-color);
     font-weight: 600;
-    margin-left: var(--spacing-sm);
-    font-size: 11px;
+    font-size: 10px;
     background-color: rgba(46, 213, 115, 0.1);
-    padding: 2px var(--spacing-xs);
+    padding: 1px var(--spacing-xs);
     border-radius: var(--radius-sm);
 }
 
@@ -894,4 +912,133 @@ input[type="text"]:focus {
 .modal-body a:hover {
     color: var(--accent-color);
     text-decoration: underline;
+}
+
+/* Close-confirm dialog: shown when the user clicks the X button, asking
+   whether to close the app or minimize to tray. */
+.close-confirm-overlay {
+    display: none;
+    position: fixed;
+    z-index: 2000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    align-items: center;
+    justify-content: center;
+}
+
+.close-confirm-overlay.show {
+    display: flex;
+}
+
+.close-confirm-dialog {
+    background-color: var(--bg-color-card);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    box-shadow: 0 8px 32px var(--shadow-dark);
+    max-width: 300px;
+    width: 90%;
+    text-align: center;
+}
+
+.close-confirm-dialog p {
+    margin: 0 0 var(--spacing-lg);
+    color: var(--text-color-secondary);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.close-confirm-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    justify-content: center;
+}
+
+.close-confirm-actions button {
+    border: 1px solid var(--border-color-dark);
+    padding: var(--spacing-sm) var(--spacing-lg);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    background-color: var(--button-secondary-bg);
+    color: var(--text-color-primary);
+}
+
+.close-confirm-actions button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px var(--shadow-medium);
+}
+
+.close-confirm-actions button.primary {
+    background-color: var(--accent-color);
+    color: var(--accent-text-color);
+    border-color: var(--accent-color);
+}
+
+.close-confirm-actions button.primary:hover {
+    background-color: var(--accent-color-hover);
+}
+
+/* Update Modal: release notes display ---------------------------------------- */
+#update-modal .modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+#update-version-text {
+    font-size: 14px;
+    color: var(--text-color-secondary);
+    margin: 0;
+}
+
+#update-version-text strong {
+    color: var(--accent-color);
+    font-size: 16px;
+}
+
+#update-notes-text {
+    margin: 0;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background-color: var(--bg-color-light);
+    border: 1px solid var(--border-color-dark);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-color-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: inherit;
+    /* Subtle scrollbar matching the theme */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color-dark) transparent;
+}
+
+#update-notes-text::-webkit-scrollbar {
+    width: 6px;
+}
+
+#update-notes-text::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#update-notes-text::-webkit-scrollbar-thumb {
+    background-color: var(--border-color-dark);
+    border-radius: 3px;
+}
+
+/* Update modal action buttons — reuse the same button system as close-confirm */
+#update-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-xs);
 }

@@ -9,7 +9,7 @@ mod updater;
 
 pub use commands::*;
 pub use constants::*;
-pub use state::{get_app_state, get_champions_data, get_summoner_spells_data};
+pub use state::{get_app_state, get_champions_data, get_summoner_spells_data, load_persisted_settings};
 pub use structs::*;
 pub use ui::*;
 pub use updater::*;
@@ -25,6 +25,13 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            // The OS passes "--autostart" back to us when it auto-launches the
+            // app at system startup, so we can tell that launch apart from a
+            // manual one (and honor "Start Minimized to Tray").
+            Some(vec!["--autostart"]),
+        ))
         .setup(|app| {
             tauri::async_runtime::spawn(async {
                 let temp_dir = std::env::temp_dir();
@@ -55,7 +62,9 @@ pub fn run() {
                 .separator()
                 .item(&quit)
                 .build()?;
-            let tray_icon = Image::from_path("icons/icon.png")?;
+            let resource_dir = app.path().resource_dir()?;
+            let icon_path = resource_dir.join("icons/icon.png");
+            let tray_icon = Image::from_path(&icon_path)?;
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(tray_icon.clone())
                 .menu(&tray_menu)
@@ -64,9 +73,7 @@ pub fn run() {
                     let app_handle = app.app_handle().clone();
                     match event.id().as_ref() {
                         "quit" => {
-                            if let Some(window) = app_handle.get_webview_window("main") {
-                                let _ = window.close();
-                            }
+                            app_handle.exit(0);
                         }
                         "hide" => {
                             let _ = app_handle.get_webview_window("main").map(|w| w.hide());
@@ -120,6 +127,28 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // When the OS auto-launches us at startup it passes "--autostart". In
+            // that case — and only if the user also opted into "Start Minimized to
+            // Tray" — skip showing the window and stay in the tray instead.
+            let launched_at_startup = std::env::args().any(|a| a == "--autostart");
+            let start_minimized = launched_at_startup
+                && load_persisted_settings()
+                    .map(|s| {
+                        eprintln!(
+                            "[start-minimized] loaded: {:?}, evaluating to {}",
+                            s.start_minimized,
+                            s.start_minimized == Some(true),
+                        );
+                        s.start_minimized == Some(true)
+                    })
+                    .unwrap_or_else(|| {
+                        eprintln!("[start-minimized] no persisted settings found");
+                        false
+                    });
+            eprintln!(
+                "[start-minimized] launched_at_startup={launched_at_startup}, start_minimized={start_minimized}",
+            );
+
             let window = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
@@ -129,23 +158,26 @@ pub fn run() {
             .icon(tray_icon.clone())?
             .inner_size(370.0, 600.0)
             .min_inner_size(370.0, 600.0)
+            .visible(!start_minimized)
             .build()?;
+
+            // Intercept the window close button so we can ask the user whether
+            // to actually quit or minimize to tray instead.
+            let close_handle = app.app_handle().clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    if let Some(win) = close_handle.get_webview_window("main") {
+                        let _ = win.emit("close-requested", ());
+                    }
+                }
+            });
 
             let app_handle_clone = app.app_handle().clone();
             window.once("tauri://created", move |_| {
                 let app_handle = app_handle_clone.clone();
                 tauri::async_runtime::spawn(async move {
-                    // Re-emit initial data
-                    let _champions_result = get_champions_data().await;
-                    let _spells_result = get_summoner_spells_data().await;
-                    let _champions_array = match get_champions_data().await {
-                        Ok(champions_data) => &champions_data.array,
-                        Err(_) => return,
-                    };
-                    let _spells_array = match get_summoner_spells_data().await {
-                        Ok(spells_data) => &spells_data.array,
-                        Err(_) => return,
-                    };
+                    let _ = get_summoner_spells_data().await;
                 });
             });
 
@@ -180,8 +212,18 @@ pub fn run() {
                         game_state.gameflow_status = "Waiting for League Client...".to_string();
                     }
                 }
+
+                // Restore persisted settings (close-to-tray, toggles, picks/bans).
+                if let Some(saved) = load_persisted_settings() {
+                    let mut game_state = get_app_state().get_game_state_mut().await;
+                    game_state.settings = saved;
+                }
+
                 let game_state = get_app_state().get_game_state().await;
                 update_ui(&app_handle, &game_state).await;
+                // Tell the renderer we have fully loaded state (including persisted
+                // settings) so it can safely call get_game_state().
+                let _ = app_handle.emit("state-ready", ());
 
                 manager.start(app_handle.clone()).await;
 
@@ -193,6 +235,7 @@ pub fn run() {
                         let tray_settings = TraySettings {
                             auto_accept: current_game_state.settings.auto_accept,
                             pick_ban_selection: current_game_state.settings.pick_ban_selection,
+                            auto_bravery: current_game_state.settings.auto_bravery,
                             spell_selection: current_game_state.settings.spell_selection,
                         };
                         let _ = update_tray_tooltip(
@@ -227,11 +270,14 @@ pub fn run() {
             remove_champion_ban,
             reorder_champion_picks,
             hide_app,
+            close_app,
             update_tray_tooltip,
             get_champions_and_spells,
             get_current_game_state,
             run_updater,
-            frontend_ready
+            frontend_ready,
+            get_autostart_state,
+            toggle_autostart
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -28,6 +28,13 @@ document.addEventListener("DOMContentLoaded", () => {
     spell2Dropdown: document.getElementById("spell2-dropdown"),
     spell1Image: document.getElementById("spell1-image"),
     spell2Image: document.getElementById("spell2-image"),
+    autoBraveryCheckbox: document.getElementById("auto-bravery-checkbox"),
+    autoAcceptCheckbox: document.getElementById("auto-accept-checkbox"),
+    pickBanSelectionCheckbox: document.getElementById(
+      "pick-ban-selection-checkbox",
+    ),
+    spellSelectionCheckbox: document.getElementById("spell-selection-checkbox"),
+    closeToTrayCheckbox: document.getElementById("close-to-tray-checkbox"),
   });
 
   elements.updateButton.classList.add("hidden");
@@ -47,7 +54,12 @@ document.addEventListener("DOMContentLoaded", () => {
   let lastIsLeagueRunning = false;
   let currentConnectionStatus = "Starting...";
   let currentGameflowStatus = "Waiting for League Client...";
+  let currentGameMode = "";
+  let isLcuConnected = false;
   let normalizedChampionCache = new Map();
+  // Set to true once the backend emits "state-ready" after loading persisted
+  // settings. Until then, get_game_state() might race with the initial disk load.
+  let stateReady = false;
 
   function debounce(func, delay) {
     let timeoutId;
@@ -89,6 +101,10 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  function isArena() {
+    return currentGameMode === "CHERRY";
+  }
+
   const settingsChangeHandler = (event) => {
     const target = event.target;
     if (target.type === "checkbox" && target.dataset.setting) {
@@ -111,6 +127,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const currentSettings = {
           autoAccept: document.getElementById("auto-accept-checkbox").checked,
+          autoBravery: document.getElementById("auto-bravery-checkbox").checked,
           pickBanSelection: document.getElementById(
             "pick-ban-selection-checkbox",
           ).checked,
@@ -258,22 +275,97 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     window.tauriAPI.on("update-available", (data) => {
+      // Fill and show the update modal with version + release notes.
+      // The footer also indicates the update so it's visible without opening the modal.
       elements.updateStatus.textContent = `Update available: v${data.version}`;
       elements.updateButton.classList.remove("hidden");
-      elements.updateButton.onclick = () => {
-        elements.updateStatus.textContent = "Updating...";
-        window.tauriAPI.send("run_updater", { url: data.url });
-      };
+      elements.updateButton.onclick = () => showUpdateModal();
+
+      const versionText = document.getElementById("update-version-text");
+      if (versionText) {
+        versionText.innerHTML = `A new version <strong>v${data.version}</strong> is available.`;
+      }
+
+      const notesEl = document.getElementById("update-notes-text");
+      if (notesEl) {
+        notesEl.textContent = data.notes || "No release notes provided.";
+      }
+
+      const nowBtn = document.getElementById("update-now-btn");
+      if (nowBtn) {
+        nowBtn.dataset.updateUrl = data.url || "";
+      }
+      showUpdateModal();
     });
+
+    window.tauriAPI.on("state-ready", () => {
+    if (!stateReady) {
+      console.log("[state] state-ready received, re-fetching game state");
+      stateReady = true;
+    }
+  });
 
     window.tauriAPI.on("checking-for-updates", () => {
       elements.updateStatus.textContent = "Checking for updates...";
+    });
+
+    // Fired after every update check (whether or not an update was found).
+    // For the "already up to date" path, "update-available" is never received,
+    // so this is the only chance to restore the footer text.
+    window.tauriAPI.on("check-updates-complete", () => {
+      const current = elements.updateStatus.textContent;
+      // Only reset if the check resolved in the "already up to date" path —
+      // i.e. the status never progressed beyond "Checking for updates...".
+      if (current === "Checking for updates...") {
+        elements.updateStatus.textContent = "Program is up to date.";
+      }
+    });
+
+    window.tauriAPI.on("close-requested", () => {
+      // Read the current close-to-tray preference from the checkbox's
+      // data-initialized attribute. If the user has never set this preference
+      // (backend value is null), show a one-time dialog.
+      const cb = document.getElementById("close-to-tray-checkbox");
+      if (cb.dataset.initialized !== "true") {
+        document.getElementById("close-pref-dialog").classList.add("show");
+        return;
+      }
+      if (cb.checked) {
+        window.tauriAPI.send("hide_app");
+      } else {
+        window.tauriAPI.send("close_app");
+      }
+    });
+
+    // One-time close preference dialog buttons also save the choice.
+    document.getElementById("close-pref-quit").addEventListener("click", () => {
+      document.getElementById("close-pref-dialog").classList.remove("show");
+      window.tauriAPI.send("update_checkbox", { id: "close-to-tray", checked: false });
+      window.tauriAPI.send("close_app");
+    });
+    document.getElementById("close-pref-tray").addEventListener("click", () => {
+      document.getElementById("close-pref-dialog").classList.remove("show");
+      window.tauriAPI.send("update_checkbox", { id: "close-to-tray", checked: true });
+      window.tauriAPI.send("hide_app");
+    });
+
+    window.tauriAPI.onChampionsUpdated(async () => {
+      // A live LCU refresh just succeeded; re-fetch champion data so autocomplete
+      // stays in sync — especially important when new champions are released.
+      try {
+        const data = await window.tauriAPI.getChampionsAndSpells();
+        champions = data.champions || [];
+        buildNormalizedChampionCache();
+      } catch (e) {
+        console.error("Failed to refresh champions:", e);
+      }
     });
 
     window.tauriAPI.on("status-update", (data) => {
       // Batch DOM updates
       requestAnimationFrame(() => {
         updateConnectionStatus(data);
+        updateControlStates();
         if (data.gameflowStatus !== undefined) {
           currentGameflowStatus = data.gameflowStatus;
           elements.gameflowStatus.textContent = data.gameflowStatus;
@@ -281,15 +373,26 @@ document.addEventListener("DOMContentLoaded", () => {
         if (data.assignedRole !== undefined) {
           updateAssignedRole(data.assignedRole);
         }
+        if (data.gameMode !== undefined && data.gameMode !== currentGameMode) {
+          currentGameMode = data.gameMode;
+          updateControlStates();
+        }
 
         // Update checkbox states based on main process settings
         if (data.settings) {
           document.getElementById("auto-accept-checkbox").checked =
             data.settings.autoAccept;
+          document.getElementById("auto-bravery-checkbox").checked =
+            data.settings.autoBravery;
           document.getElementById("pick-ban-selection-checkbox").checked =
             data.settings.pickBanSelection;
           document.getElementById("spell-selection-checkbox").checked =
             data.settings.spellSelection;
+          const ctt = document.getElementById("close-to-tray-checkbox");
+            if (data.settings.closeToTray != null) {
+              ctt.checked = data.settings.closeToTray;
+              ctt.dataset.initialized = "true";
+            }
 
           // Ensure pick/ban section visibility is correct on update
           elements.pickBanSection.style.display = data.settings.pickBanSelection
@@ -303,6 +406,22 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function fetchAndInitializeData() {
+    // Wait for the backend to finish loading persisted state from disk.
+    // This prevents get_game_state() from returning default values when it races
+    // ahead of the async settings load in lib.rs.
+    if (!stateReady) {
+      console.log("[state] waiting for state-ready...");
+      await new Promise((resolve) => {
+        const timeout = setTimeout(resolve, 5000); // 5s fallback
+        window.tauriAPI.once("state-ready", () => {
+          clearTimeout(timeout);
+          stateReady = true;
+          resolve();
+        });
+      });
+      console.log("[state] state-ready confirmed, fetching game state");
+    }
+
     try {
       const initialData = await window.tauriAPI.getChampionsAndSpells();
       console.log("Fetched initial data:", initialData);
@@ -323,13 +442,48 @@ document.addEventListener("DOMContentLoaded", () => {
       if (gameState.assignedRole !== undefined) {
         updateAssignedRole(gameState.assignedRole);
       }
+      if (gameState.gameMode !== undefined) {
+        currentGameMode = gameState.gameMode;
+      }
       if (gameState.settings) {
         document.getElementById("auto-accept-checkbox").checked =
           gameState.settings.autoAccept;
+        document.getElementById("auto-bravery-checkbox").checked =
+          gameState.settings.autoBravery;
         document.getElementById("pick-ban-selection-checkbox").checked =
           gameState.settings.pickBanSelection;
         document.getElementById("spell-selection-checkbox").checked =
           gameState.settings.spellSelection;
+        const ctt = document.getElementById("close-to-tray-checkbox");
+        if (gameState.settings.closeToTray != null) {
+          ctt.checked = gameState.settings.closeToTray;
+          ctt.dataset.initialized = "true";
+        }
+
+        // Initialize autostart checkbox state from registry
+        try {
+          const autostartEnabled = await window.tauriAPI.send("get_autostart_state");
+          console.log("[autostart] init state from registry:", autostartEnabled);
+          document.getElementById("open-on-start-checkbox").checked = autostartEnabled;
+          // "Start Minimized to Tray" is a sub-option of Open on System Start,
+          // so it follows the autostart toggle's state.
+          updateStartMinimizedVisibility(autostartEnabled);
+          const minCb = document.getElementById("start-minimized-checkbox");
+          console.log(
+            "[autostart] startMinimized from settings:",
+            gameState.settings.startMinimized,
+          );
+          if (minCb && gameState.settings.startMinimized != null) {
+            console.log("[autostart] initializing checkbox to:", gameState.settings.startMinimized);
+            minCb.checked = gameState.settings.startMinimized;
+          } else {
+            console.log("[autostart] startMinimized is null/undefined — checkbox left at default");
+          }
+        } catch (e) {
+          console.error("[autostart] init failed:", e);
+          updateStartMinimizedVisibility(false);
+        }
+
         elements.pickBanSection.style.display = gameState.settings
           .pickBanSelection
           ? "block"
@@ -337,6 +491,7 @@ document.addEventListener("DOMContentLoaded", () => {
         updateSpellWarning();
       }
       updateSettingsSummary();
+      updateControlStates();
 
       if (
         gameState.connectionStatus &&
@@ -361,6 +516,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (data.connectionStatus !== undefined) {
       currentConnectionStatus = data.connectionStatus;
+      isLcuConnected = currentConnectionStatus === "Connected";
       const statusText = lastIsLeagueRunning
         ? `✅ ${currentConnectionStatus || "League Client Running"}`
         : `❌ ${currentConnectionStatus || "League Client not running"}`;
@@ -370,6 +526,27 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.connectionStatus.className = lastIsLeagueRunning
       ? "status-connected"
       : "status-disconnected";
+  }
+
+  function updateControlStates() {
+    const controls = [
+      elements.autoAcceptCheckbox,
+      elements.pickBanSelectionCheckbox,
+      elements.spellSelectionCheckbox,
+      elements.clearPicksBansButton,
+      elements.pickTextInput,
+      elements.banTextInput,
+      elements.spell1Dropdown,
+      elements.spell2Dropdown,
+    ];
+    for (const el of controls) {
+      if (el) el.disabled = !isLcuConnected;
+    }
+
+    // Bravery is additionally gated on Arena mode.
+    if (elements.autoBraveryCheckbox) {
+      elements.autoBraveryCheckbox.disabled = !(isLcuConnected && isArena());
+    }
   }
 
   function updateAssignedRole(role) {
@@ -418,6 +595,15 @@ document.addEventListener("DOMContentLoaded", () => {
       () => {
         window.tauriAPI.send("hide_app");
         elements.fileDropdownContent.classList.remove("show");
+      },
+      { passive: true },
+    );
+
+    document.getElementById("settings-button").addEventListener(
+      "click",
+      () => {
+        elements.fileDropdownContent.classList.remove("show");
+        showSettingsModal();
       },
       { passive: true },
     );
@@ -1094,12 +1280,6 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && modal?.style.display === "block") {
-        hideAboutModal();
-      }
-    });
-
     // Handle external links - open in default browser
     const aboutLinks = modal?.querySelectorAll('a[href^="http"]');
     aboutLinks?.forEach((link) => {
@@ -1136,6 +1316,135 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function setupUpdateModal() {
+    const closeBtn = document.getElementById("close-update");
+    const laterBtn = document.getElementById("update-later-btn");
+    const nowBtn = document.getElementById("update-now-btn");
+    const modal = document.getElementById("update-modal");
+
+    closeBtn?.addEventListener("click", hideUpdateModal);
+    laterBtn?.addEventListener("click", hideUpdateModal);
+
+    modal?.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        hideUpdateModal();
+      }
+    });
+
+    // "Update Now" — download and install the update.
+    nowBtn?.addEventListener("click", () => {
+      hideUpdateModal();
+      // Stored by the update-available handler below when it populates the modal.
+      const pendingUrl = nowBtn.dataset.updateUrl;
+      if (pendingUrl) {
+        elements.updateStatus.textContent = "Updating...";
+        window.tauriAPI.send("run_updater", { url: pendingUrl });
+      }
+    });
+  }
+
+  function showSettingsModal() {
+    const modal = document.getElementById("settings-modal");
+    if (modal) {
+      modal.style.display = "block";
+      document.body.style.overflow = "hidden";
+    }
+  }
+
+  function hideSettingsModal() {
+    const modal = document.getElementById("settings-modal");
+    if (modal) {
+      modal.style.display = "none";
+      document.body.style.overflow = "";
+    }
+  }
+
+  function showUpdateModal() {
+    const modal = document.getElementById("update-modal");
+    if (modal) {
+      modal.style.display = "block";
+      document.body.style.overflow = "hidden";
+    }
+  }
+
+  function hideUpdateModal() {
+    const modal = document.getElementById("update-modal");
+    if (modal) {
+      modal.style.display = "none";
+      document.body.style.overflow = "";
+    }
+  }
+
+  // "Start Minimized to Tray" is a sub-option of "Open on System Start" and is
+  // only shown while autostart is enabled. Toggles the row's visibility.
+  function updateStartMinimizedVisibility(autostartEnabled) {
+    const group = document.getElementById("start-minimized-group");
+    if (group) {
+      group.classList.toggle("hidden", !autostartEnabled);
+    }
+  }
+
+  function setupSettingsModal() {
+    const modal = document.getElementById("settings-modal");
+    const closeButton = document.getElementById("close-settings");
+
+    closeButton?.addEventListener("click", hideSettingsModal);
+
+    modal?.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        hideSettingsModal();
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && modal?.style.display === "block") {
+        hideSettingsModal();
+      }
+    });
+
+    // Close to tray toggle — persists via the backend.
+    document.getElementById("close-to-tray-checkbox").addEventListener("change", (event) => {
+      event.target.dataset.initialized = "true";
+      window.tauriAPI.send("update_checkbox", {
+        id: "close-to-tray",
+        checked: event.target.checked,
+      });
+    });
+
+    // Open on system start toggle
+    document.getElementById("open-on-start-checkbox").addEventListener("change", async (event) => {
+      const enabled = event.target.checked;
+      console.log("[autostart] checkbox changed to:", enabled);
+      try {
+        await window.tauriAPI.send("toggle_autostart", { enabled });
+        console.log("[autostart] toggle succeeded");
+        // The "Start Minimized to Tray" sub-option only applies while autostart
+        // is on; toggle its row, and reset the setting when turning autostart off.
+        updateStartMinimizedVisibility(enabled);
+        if (!enabled) {
+          const minCb = document.getElementById("start-minimized-checkbox");
+          if (minCb && minCb.checked) {
+            minCb.checked = false;
+            window.tauriAPI.send("update_checkbox", { id: "start-minimized", checked: false });
+          }
+        }
+      } catch (e) {
+        console.error("[autostart] toggle failed:", e);
+        event.target.checked = !enabled;
+        console.log("[autostart] reverted checkbox to:", event.target.checked);
+        updateStartMinimizedVisibility(event.target.checked);
+      }
+    });
+
+    // "Start Minimized to Tray" sub-option — persists via the backend.
+    document.getElementById("start-minimized-checkbox").addEventListener("change", (event) => {
+      window.tauriAPI.send("update_checkbox", {
+        id: "start-minimized",
+        checked: event.target.checked,
+      });
+    });
+  }
+
   async function init() {
     setupCollapsibleSections();
     setupThemeToggle();
@@ -1143,6 +1452,8 @@ document.addEventListener("DOMContentLoaded", () => {
     setupButtonHandlers();
     setupInputEventListeners();
     setupAboutModal();
+    setupUpdateModal();
+    setupSettingsModal();
     fetchAndInitializeData();
     setInitialDisplay();
     window.tauriAPI.send("frontend_ready");

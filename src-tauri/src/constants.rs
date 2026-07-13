@@ -17,3 +17,18 @@ pub const STATUS_CONNECTED: &str = "Connected";
 pub const STATUS_CONNECTION_LOST: &str = "Connection lost";
 pub const STATUS_LEAGUE_CLOSED: &str = "League Client closed";
 pub const ROLE_EMPTY: &str = "";
+
+// Champion Select virtual champion IDs.
+// The LCU ships a few "champions" that never exist in champion-summary.json:
+//   -1 = none/dummy (empty slot, "skip")
+// Bravery is a special Arena-only pick that the client accepts but never
+// surfaces in any grid or pickable list, so it has to be hardcoded - just
+// like Riot's own RCP client does internally.
+pub const NONE_CHAMPION_ID: i32 = -1;
+pub const BRAVERY_CHAMPION_ID: i32 = -3;
+
+// Internal game-mode name for Arena (斗魂竞技场). Used to gate Bravery.
+pub const CHERRY_GAME_MODE: &str = "CHERRY";
+
+// Display name for the Bravery pick, used by the frontend and in pick/ban UI.
+pub const BRAVERY_NAME: &str = "Bravery";
