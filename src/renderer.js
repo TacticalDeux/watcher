@@ -18,7 +18,6 @@ document.addEventListener("DOMContentLoaded", () => {
     themeIcon: document.getElementById("theme-icon"),
     updateButton: document.getElementById("update-button"),
     updateStatus: document.getElementById("update-status"),
-    settingsSummary: document.getElementById("settings-summary"),
     pickBanSection: document.getElementById("pick-ban-section"),
     pickSuggestions: document.getElementById("pick-suggestions"),
     banSuggestions: document.getElementById("ban-suggestions"),
@@ -53,7 +52,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let banHighlightedIndex = -1;
   let lastIsLeagueRunning = false;
   let currentConnectionStatus = "Starting...";
-  let currentGameflowStatus = "Waiting for League Client...";
+  let currentGameflowStatus = "Waiting for League...";
   let currentGameMode = "";
   let isLcuConnected = false;
   let normalizedChampionCache = new Map();
@@ -105,6 +104,15 @@ document.addEventListener("DOMContentLoaded", () => {
     return currentGameMode === "CHERRY";
   }
 
+  // Show/hide the pick/ban config panel via the CSS `.expanded` transition
+  // rather than display:block/none, so the max-height animation runs and the
+  // collapsed styling (max-height:0; opacity:0) keeps it hidden by default.
+  function setPickBanExpanded(expanded) {
+    if (elements.pickBanSection) {
+      elements.pickBanSection.classList.toggle("expanded", !!expanded);
+    }
+  }
+
   const settingsChangeHandler = (event) => {
     const target = event.target;
     if (target.type === "checkbox" && target.dataset.setting) {
@@ -119,11 +127,8 @@ document.addEventListener("DOMContentLoaded", () => {
           updateSpellWarning();
         }
         if (target.dataset.setting === "pick-ban-selection") {
-          elements.pickBanSection.style.display = target.checked
-            ? "block"
-            : "none";
+          setPickBanExpanded(target.checked);
         }
-        updateSettingsSummary();
 
         const currentSettings = {
           autoAccept: document.getElementById("auto-accept-checkbox").checked,
@@ -187,33 +192,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function updateSettingsSummary() {
-    const checkboxes = elements.settingsSection.querySelectorAll(
-      'input[type="checkbox"][data-setting]',
-    );
-    const activeSettings = [];
-
-    for (let i = 0; i < checkboxes.length; i++) {
-      const checkbox = checkboxes[i];
-      if (checkbox.checked) {
-        const label = document.querySelector(`label[for="${checkbox.id}"]`);
-        if (label) {
-          // Map UI labels to main process expected strings
-          const settingName =
-            checkbox.id === "auto-accept-checkbox"
-              ? "Auto-Accept"
-              : label.textContent;
-          activeSettings.push(settingName);
-        }
-      }
-    }
-
-    elements.settingsSummary.textContent =
-      activeSettings.length > 0
-        ? `On: ${activeSettings.join(", ")}`
-        : "All Off";
-  }
-
   function setupCollapsibleSections() {
     const sectionHeaders = document.querySelectorAll(".section-header");
     const clickHandler = (event) => {
@@ -239,33 +217,34 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function setupThemeToggle() {
-    const currentTheme = localStorage.getItem("theme") || "light-theme";
-    document.body.classList.add(currentTheme);
-    updateThemeIcon(currentTheme);
-
-    const themeToggleHandler = () => {
-      const isDark = document.body.classList.contains("dark-theme");
-      const newTheme = isDark ? "light-theme" : "dark-theme";
-
-      // Batch DOM updates
-      requestAnimationFrame(() => {
-        document.body.classList.remove("light-theme", "dark-theme");
-        document.body.classList.add(newTheme);
-        localStorage.setItem("theme", newTheme);
-        updateThemeIcon(newTheme);
-      });
-    };
-
-    elements.themeToggleButton.addEventListener("click", themeToggleHandler, {
-      passive: true,
-    });
+  // Apply the theme: dark is the :root default (no body class); light adds
+  // the `.light` class to <body>, which style.css keys token overrides off.
+  // The icon is CSS-only FA, so swapping the class list just changes the glyph
+  // — no SVG cloning (that was the old FA-JS bug).
+  function applyTheme(isLight) {
+    document.body.classList.toggle("light", isLight);
+    localStorage.setItem("theme", isLight ? "light" : "dark");
+    // Light mode shows a moon (switch back to dark); dark shows a sun.
+    elements.themeIcon.classList.toggle("fa-moon", isLight);
+    elements.themeIcon.classList.toggle("fa-sun", !isLight);
   }
 
-  function updateThemeIcon(theme) {
-    const isDark = theme === "dark-theme";
-    elements.themeIcon.classList.toggle("fa-moon", isDark);
-    elements.themeIcon.classList.toggle("fa-sun", !isDark);
+  function setupThemeToggle() {
+    // Migrate legacy keys: "light-theme"/"light" -> light; anything else
+    // (including "dark-theme", "dark", or absent) -> dark (the :root default).
+    const stored = localStorage.getItem("theme");
+    const isLight = stored === "light-theme" || stored === "light";
+    applyTheme(isLight);
+
+    elements.themeToggleButton.addEventListener(
+      "click",
+      () => {
+        requestAnimationFrame(() =>
+          applyTheme(!document.body.classList.contains("light")),
+        );
+      },
+      { passive: true },
+    );
   }
 
   async function setupIPCListeners() {
@@ -394,13 +373,10 @@ document.addEventListener("DOMContentLoaded", () => {
               ctt.dataset.initialized = "true";
             }
 
-          // Ensure pick/ban section visibility is correct on update
-          elements.pickBanSection.style.display = data.settings.pickBanSelection
-            ? "block"
-            : "none";
+          // Ensure pick/ban section visibility stays in sync with the setting.
+          setPickBanExpanded(data.settings.pickBanSelection);
           updateSpellWarning();
         }
-        updateSettingsSummary();
       });
     });
   }
@@ -484,13 +460,10 @@ document.addEventListener("DOMContentLoaded", () => {
           updateStartMinimizedVisibility(false);
         }
 
-        elements.pickBanSection.style.display = gameState.settings
-          .pickBanSelection
-          ? "block"
-          : "none";
+        restoreSpellDropdowns(gameState.settings);
+        setPickBanExpanded(gameState.settings.pickBanSelection);
         updateSpellWarning();
       }
-      updateSettingsSummary();
       updateControlStates();
 
       if (
@@ -518,8 +491,8 @@ document.addEventListener("DOMContentLoaded", () => {
       currentConnectionStatus = data.connectionStatus;
       isLcuConnected = currentConnectionStatus === "Connected";
       const statusText = lastIsLeagueRunning
-        ? `✅ ${currentConnectionStatus || "League Client Running"}`
-        : `❌ ${currentConnectionStatus || "League Client not running"}`;
+        ? `${currentConnectionStatus || "League Running"}`
+        : `${currentConnectionStatus || "League not running"}`;
       elements.connectionStatus.textContent = statusText;
     }
 
@@ -1181,6 +1154,39 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.spellWarningLabel.style.display = shouldShow ? "block" : "none";
   }
 
+  // On launch the backend hands back the persisted summoner spells as spell
+  // IDs (e.g. "SummonerFlash"), but the dropdowns are keyed by spell name and
+  // the icons are named off the lowercased name ("<name>.webp"). Map each
+  // stored spell back to its name, select it in the dropdown, and show the
+  // matching icon so a previously-chosen spell pair survives a restart.
+  function restoreSpellDropdowns(settings) {
+    if (!settings || !summonerSpells || summonerSpells.length === 0) return;
+
+    const restoreSlot = (id, dropdown, image, setter) => {
+      if (!id) return;
+      const spell = summonerSpells.find((s) => s.id === id);
+      if (!spell) return;
+      if (dropdown) dropdown.value = spell.name;
+      if (image) image.src = `./images/${spell.name.toLowerCase()}.webp`;
+      setter(spell.name);
+    };
+
+    restoreSlot(
+      settings.selectedSpell1,
+      elements.spell1Dropdown,
+      elements.spell1Image,
+      (v) => { selectedSpell1 = v; },
+    );
+    restoreSlot(
+      settings.selectedSpell2,
+      elements.spell2Dropdown,
+      elements.spell2Image,
+      (v) => { selectedSpell2 = v; },
+    );
+
+    updateSpellWarning();
+  }
+
   const activeLabelTimeouts = new Set();
 
   function showTemporaryLabel(element, message, duration) {
@@ -1209,7 +1215,6 @@ document.addEventListener("DOMContentLoaded", () => {
   function setInitialDisplay() {
     // Batch initial display setup
     const elementsToHide = [
-      elements.pickBanSection,
       elements.pickNotFoundLabel,
       elements.banNotFoundLabel,
       elements.spellWarningLabel,
@@ -1252,7 +1257,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function showAboutModal() {
     const modal = document.getElementById("about-modal");
     if (modal) {
-      modal.style.display = "block";
+      modal.classList.add("show");
       // Prevent body scroll when modal is open
       document.body.style.overflow = "hidden";
     }
@@ -1261,7 +1266,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function hideAboutModal() {
     const modal = document.getElementById("about-modal");
     if (modal) {
-      modal.style.display = "none";
+      modal.classList.remove("show");
       // Restore body scroll
       document.body.style.overflow = "";
     }
@@ -1346,7 +1351,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function showSettingsModal() {
     const modal = document.getElementById("settings-modal");
     if (modal) {
-      modal.style.display = "block";
+      modal.classList.add("show");
       document.body.style.overflow = "hidden";
     }
   }
@@ -1354,7 +1359,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function hideSettingsModal() {
     const modal = document.getElementById("settings-modal");
     if (modal) {
-      modal.style.display = "none";
+      modal.classList.remove("show");
       document.body.style.overflow = "";
     }
   }
@@ -1362,7 +1367,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function showUpdateModal() {
     const modal = document.getElementById("update-modal");
     if (modal) {
-      modal.style.display = "block";
+      modal.classList.add("show");
       document.body.style.overflow = "hidden";
     }
   }
@@ -1370,7 +1375,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function hideUpdateModal() {
     const modal = document.getElementById("update-modal");
     if (modal) {
-      modal.style.display = "none";
+      modal.classList.remove("show");
       document.body.style.overflow = "";
     }
   }
@@ -1397,7 +1402,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && modal?.style.display === "block") {
+      if (event.key === "Escape" && modal?.classList.contains("show")) {
         hideSettingsModal();
       }
     });

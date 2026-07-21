@@ -1,297 +1,274 @@
 <!doctype html>
-<html>
-    <head>
-        <meta charset="UTF-8" />
-        <title>Watcher</title>
-        <link rel="icon" href="/assets/64x64.png" type="image/png" />
-        <meta
-            http-equiv="Content-Security-Policy"
-            content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost;"
-        />
-        <link rel="stylesheet" href="./style.css" />
-        <link rel="stylesheet" href="./vendor/all.min.css" />
-    </head>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watcher</title>
+    <link rel="stylesheet" href="./vendor/all.min.css" />
+    <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
 
-    <body>
-        <div id="top-panel">
-            <div class="top-panel-group">
-                <div class="dropdown">
-                    <button class="dropbtn" id="file-menu-button">File</button>
-                    <div class="dropdown-content" id="file-dropdown-content">
-                        <a href="#" id="hide-app-button">Hide App</a>
-                        <a href="#" id="settings-button">Settings</a>
-                    </div>
-                </div>
-                <button id="update-button" class="hidden">Update</button>
-            </div>
-            <div class="top-panel-group">
-                <button id="theme-toggle">
-                    <i id="theme-icon" class="fas fa-sun"></i>
-                </button>
-                <button id="about-button">About</button>
-            </div>
+  <!-- ══ TOP PANEL ══════════════════════════════════ -->
+  <div id="top-panel">
+    <div class="top-panel-group">
+      <div class="dropdown">
+        <button class="dropbtn" id="file-menu-button">
+          <i class="fa-solid fa-bars" style="font-size:11px; margin-right:5px;"></i>File
+      </button>
+      <div class="dropdown-content" id="file-dropdown-content">
+          <a href="#" id="hide-app-button"><i class="fa-solid fa-eye-slash"></i> Hide App</a>
+          <a href="#" id="settings-button"><i class="fa-solid fa-gear"></i> Settings</a>
+      </div>
+  </div>
+  <button id="update-button" class="hidden">
+    <i class="fa-solid fa-arrow-up"></i> Update
+</button>
+</div>
+
+<!-- Brand center -->
+<div id="app-brand">
+  <i class="fa-solid fa-shield-halved brand-icon"></i>
+  <span class="brand-name">Watcher</span>
+</div>
+
+<div class="top-panel-group">
+  <button id="theme-toggle" title="Toggle theme">
+    <i id="theme-icon" class="fas fa-sun"></i>
+</button>
+<button id="about-button">About</button>
+</div>
+</div>
+
+<!-- ══ MAIN CONTENT ══════════════════════════════ -->
+<div id="main-content">
+    <div id="content-panel" class="panel">
+
+      <!-- ── Match State ─────────────────────────── -->
+      <div class="content-section" id="match-state-section">
+        <h2 class="section-header" id="match-state-header">
+          <div class="section-title-group">
+            <div class="section-icon"><i class="fa-solid fa-circle-dot"></i></div>
+            <span class="section-title">Match State</span>
         </div>
+        <i class="fas fa-chevron-down"></i>
+    </h2>
+    <div class="section-content" id="match-state-content">
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <div class="status-card" style="flex:2; min-width:140px;">
+          <div class="status-card-label">Gameflow Status</div>
+          <div class="status-card-value"><span id="gameflow-status">None</span></div>
+      </div>
+      <div class="status-card" style="flex:1; min-width:100px;">
+          <div class="status-card-label">Assigned Role</div>
+          <div class="status-card-value"><p id="assigned-role">—</p></div>
+      </div>
+  </div>
+</div>
+</div>
 
-        <div id="main-content">
-            <div id="content-panel" class="panel">
-                <!-- Match State Section -->
-                <div class="content-section" id="match-state-section">
-                    <h2 class="section-header">
-                        <div class="section-title-group">
-                            <span class="section-title">Match State</span>
-                        </div>
-                        <i class="fas fa-chevron-down"></i>
-                    </h2>
-                    <div class="section-content">
-                        <p>
-                            Gameflow Status: <span id="gameflow-status"></span>
-                        </p>
-                        <p id="assigned-role"></p>
-                    </div>
-                </div>
+<!-- ── Automation ──────────────────────────── -->
+<div class="content-section" id="settings-section">
+    <h2 class="section-header" id="automation-header">
+      <div class="section-title-group">
+        <div class="section-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+        <span class="section-title">Automation</span>
+    </div>
+    <i class="fas fa-chevron-down"></i>
+</h2>
+<div class="section-content" id="automation-content">
 
-                <!-- Automation Section -->
-                <div class="content-section" id="settings-section">
-                    <h2 class="section-header">
-                        <div class="section-title-group">
-                            <span class="section-title">Automation</span>
-                            <span
-                                id="settings-summary"
-                                class="section-summary"
-                            ></span>
-                        </div>
-                        <i class="fas fa-chevron-down"></i>
-                    </h2>
-                    <div class="section-content">
-                        <div class="horizontal-group">
-                            <button id="clear-picks-bans">
-                                Clear Picks/Bans
-                            </button>
-                            <span
-                                id="pick-ban-status"
-                                class="info-label"
-                            ></span>
-                        </div>
+  <!-- Spell Selection Row -->
+  <div class="spell-selection-container">
+    <div class="spell-group">
+      <img id="spell1-image" src="./images/no_icon.webp" alt="Spell 1" />
+      <select id="spell1-dropdown"></select>
+  </div>
+  <div class="spell-separator">+</div>
+  <div class="spell-group">
+      <img id="spell2-image" src="./images/no_icon.webp" alt="Spell 2" />
+      <select id="spell2-dropdown"></select>
+  </div>
+</div>
 
-                        <div class="spell-selection-container">
-                            <div class="spell-group">
-                                <img
-                                    id="spell1-image"
-                                    src="./images/no_icon.webp"
-                                    alt="Spell 1"
-                                />
-                                <select id="spell1-dropdown"></select>
-                            </div>
-                            <div class="spell-separator">+</div>
-                            <div class="spell-group">
-                                <img
-                                    id="spell2-image"
-                                    src="./images/no_icon.webp"
-                                    alt="Spell 2"
-                                />
-                                <select id="spell2-dropdown"></select>
-                            </div>
-                        </div>
+<!-- Spell Auto Selection toggle -->
+<div class="toggle-row">
+    <div class="toggle-label-wrap">
+      <label class="toggle-label" for="spell-selection-checkbox">Spell Auto Selection</label>
+      <span class="toggle-desc">Auto-equip your chosen summoner spells</span>
+  </div>
+  <input type="checkbox" id="spell-selection-checkbox" data-setting="spell-selection" />
+  <label class="toggle-switch" for="spell-selection-checkbox"></label>
+</div>
+<span id="spell-warning-label" class="warning-label">Both summoner spells need to be selected</span>
 
-                        <div class="checkbox-group">
-                            <input
-                                type="checkbox"
-                                id="spell-selection-checkbox"
-                                data-setting="spell-selection"
-                            />
-                            <label for="spell-selection-checkbox"
-                                >Spell Auto Selection</label
-                            >
-                            <span id="spell-warning-label" class="warning-label"
-                                >Both summoner spells need to be selected</span
-                            >
-                        </div>
+<!-- Auto Accept toggle -->
+<div class="toggle-row">
+    <div class="toggle-label-wrap">
+      <label class="toggle-label" for="auto-accept-checkbox">Auto Accept</label>
+      <span class="toggle-desc">Automatically accept match found popups</span>
+  </div>
+  <input type="checkbox" id="auto-accept-checkbox" data-setting="auto-accept" />
+  <label class="toggle-switch" for="auto-accept-checkbox"></label>
+</div>
 
-                        <div class="checkbox-group">
-                            <input
-                                type="checkbox"
-                                id="auto-accept-checkbox"
-                                data-setting="auto-accept"
-                            />
-                            <label for="auto-accept-checkbox"
-                                >Auto Accept</label
-                            >
-                        </div>
+<!-- Auto Bravery toggle -->
+<div class="toggle-row" id="auto-bravery-row">
+    <div class="toggle-label-wrap">
+      <label class="toggle-label" for="auto-bravery-checkbox">Auto Pick Bravery <span style="font-size:10px; color:var(--gold-dim);">Arena</span></label>
+      <span class="toggle-desc">Auto-select bravery in Arena mode</span>
+  </div>
+  <input type="checkbox" id="auto-bravery-checkbox" data-setting="auto-bravery" />
+  <label class="toggle-switch" for="auto-bravery-checkbox"></label>
+</div>
 
-                        <div class="checkbox-group">
-                            <input
-                                type="checkbox"
-                                id="auto-bravery-checkbox"
-                                data-setting="auto-bravery"
-                            />
-                            <label for="auto-bravery-checkbox"
-                                >Auto Pick Bravery (Arena)</label
-                            >
-                        </div>
+<!-- Auto Pick/Ban toggle -->
+<div class="toggle-row">
+    <div class="toggle-label-wrap">
+      <label class="toggle-label" for="pick-ban-selection-checkbox">Auto-Pick / Ban</label>
+      <span class="toggle-desc">Automatically pick and ban configured champions</span>
+  </div>
+  <input type="checkbox" id="pick-ban-selection-checkbox" data-setting="pick-ban-selection" />
+  <label class="toggle-switch" for="pick-ban-selection-checkbox"></label>
+</div>
 
-                        <div class="checkbox-group">
-                            <input
-                                type="checkbox"
-                                id="pick-ban-selection-checkbox"
-                                data-setting="pick-ban-selection"
-                            />
-                            <label for="pick-ban-selection-checkbox"
-                                >Auto-Pick/Ban</label
-                            >
-                        </div>
+<!-- Pick/Ban Config Panel -->
+<div id="pick-ban-section">
+    <h3>
+      <span><i class="fa-solid fa-chess-knight" style="margin-right:5px;"></i>Picks & Bans</span>
+      <button id="clear-picks-bans">
+        <i class="fa-solid fa-trash-can" style="margin-right:4px;"></i>Clear
+    </button>
+</h3>
 
-                        <div id="pick-ban-section">
-                            <h3>Picks and Bans</h3>
-                            <p>Enter champions to pick (2 max):</p>
-                            <div class="autocomplete-container">
-                                <input
-                                    type="text"
-                                    id="pick-text-input"
-                                    placeholder="Press enter to skip."
-                                    autocomplete="off"
-                                />
-                                <div
-                                    id="pick-suggestions"
-                                    class="suggestions-dropdown"
-                                ></div>
-                            </div>
-                            <span
-                                id="pick-not-found-label"
-                                class="warning-label"
-                            ></span>
-                            <p>Enter champion to ban:</p>
-                            <div class="autocomplete-container">
-                                <input
-                                    type="text"
-                                    id="ban-text-input"
-                                    placeholder="Press enter to skip."
-                                    autocomplete="off"
-                                />
-                                <div
-                                    id="ban-suggestions"
-                                    class="suggestions-dropdown"
-                                ></div>
-                            </div>
-                            <span
-                                id="ban-not-found-label"
-                                class="warning-label"
-                            ></span>
-                            <div id="current-picks"></div>
-                            <div id="current-bans"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+<span id="pick-ban-status" class="info-label"></span>
+
+<p>Pick champions <span style="color:var(--gold-dim);">(up to 2)</span>:</p>
+<div class="autocomplete-container">
+  <input type="text" id="pick-text-input" placeholder="Search champion…" autocomplete="off" />
+  <div id="pick-suggestions" class="suggestions-dropdown"></div>
+</div>
+<span id="pick-not-found-label" class="warning-label"></span>
+
+<p>Ban champion:</p>
+<div class="autocomplete-container">
+  <input type="text" id="ban-text-input" placeholder="Search champion…" autocomplete="off" />
+  <div id="ban-suggestions" class="suggestions-dropdown"></div>
+</div>
+<span id="ban-not-found-label" class="warning-label"></span>
+
+<div id="current-picks"></div>
+<div id="current-bans"></div>
+</div>
+
+</div>
+</div>
+</div><!-- /content-panel -->
+</div><!-- /main-content -->
+
+<!-- ══ STATUS FOOTER ══════════════════════════════ -->
+<div class="status-footer">
+    <div class="left-status">
+      <p id="connection-status">Connected to LCU</p>
+  </div>
+  <div class="right-status">
+      <p id="update-status">Program is up to date.</p>
+      <p style="color:var(--gold-dim);">v3.2.0</p>
+  </div>
+</div>
+
+<!-- ══ CLOSE PREF DIALOG ═════════════════════════ -->
+<div id="close-pref-dialog" class="close-confirm-overlay">
+    <div class="close-confirm-dialog">
+      <div style="width:40px;height:40px;border-radius:50%;background:var(--gold-glow);border:1px solid var(--gold-dim);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;color:var(--gold-primary);font-size:16px;">
+        <i class="fa-solid fa-shield-halved"></i>
+    </div>
+    <p>Close Watcher or keep it running in the system tray?</p>
+    <div class="close-confirm-actions">
+        <button id="close-pref-quit">Quit</button>
+        <button id="close-pref-tray" class="primary">Minimize to Tray</button>
+    </div>
+</div>
+</div>
+
+<!-- ══ SETTINGS MODAL ════════════════════════════ -->
+<div id="settings-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2><i class="fa-solid fa-gear" style="margin-right:8px;font-size:11px;"></i>Settings</h2>
+        <span class="close-button" id="close-settings">&times;</span>
+    </div>
+    <div class="modal-body">
+        <div class="toggle-row">
+          <div class="toggle-label-wrap">
+            <label class="toggle-label" for="close-to-tray-checkbox">Close to Tray</label>
+            <span class="toggle-desc">Minimize to system tray on window close</span>
         </div>
+        <input type="checkbox" id="close-to-tray-checkbox" data-setting="close-to-tray" />
+        <label class="toggle-switch" for="close-to-tray-checkbox"></label>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-label-wrap">
+        <label class="toggle-label" for="open-on-start-checkbox">Open on System Start</label>
+        <span class="toggle-desc">Launch Watcher automatically at login</span>
+    </div>
+    <input type="checkbox" id="open-on-start-checkbox" />
+    <label class="toggle-switch" for="open-on-start-checkbox"></label>
+</div>
+<div class="toggle-row indented hidden" id="start-minimized-group">
+  <div class="toggle-label-wrap">
+    <label class="toggle-label" for="start-minimized-checkbox">Start Minimized to Tray</label>
+</div>
+<input type="checkbox" id="start-minimized-checkbox" data-setting="start-minimized" />
+<label class="toggle-switch" for="start-minimized-checkbox"></label>
+</div>
+</div>
+</div>
+</div>
 
-        <div class="status-footer">
-            <div class="left-status">
-                <p id="connection-status"></p>
-            </div>
-            <div class="right-status">
-                <p id="update-status">Program is up to date.</p>
-                <p>v3.2.0</p>
-            </div>
+<!-- ══ ABOUT MODAL ═══════════════════════════════ -->
+<div id="about-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2><i class="fa-solid fa-shield-halved" style="margin-right:8px;font-size:11px;"></i>About Watcher</h2>
+        <span class="close-button" id="close-about">&times;</span>
+    </div>
+    <div class="modal-body">
+        <div style="display:flex;align-items:center;gap:12px;padding:10px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border-subtle);">
+          <div style="width:36px;height:36px;border-radius:50%;background:var(--gold-glow);border:1px solid var(--gold-dim);display:flex;align-items:center;justify-content:center;color:var(--gold-primary);font-size:15px;">
+            <i class="fa-solid fa-shield-halved"></i>
         </div>
-
-        <!-- Close Preference Dialog (shown once on first close) -->
-        <div id="close-pref-dialog" class="close-confirm-overlay">
-            <div class="close-confirm-dialog">
-                <p>Close Watcher or keep it running in the system tray?</p>
-                <div class="close-confirm-actions">
-                    <button id="close-pref-quit">Quit</button>
-                    <button id="close-pref-tray" class="primary">Minimize to Tray</button>
-                </div>
-            </div>
+        <div>
+            <div style="font-size:14px;font-weight:700;color:var(--gold-primary);letter-spacing:1px;">WATCHER</div>
+            <div style="font-size:11px;color:var(--text-muted);">League of Legends Automation Tool</div>
         </div>
+    </div>
+    <p><strong>Version:</strong> 3.2.0</p>
+    <p><strong>Author:</strong> <a href="https://github.com/TacticalDeux" target="_blank" rel="noopener noreferrer">TacticalDeux</a></p>
+    <p><strong>Source Code:</strong> <a href="https://github.com/tacticaldeux/watcher" target="_blank" rel="noopener noreferrer">tacticaldeux/watcher</a></p>
+</div>
+</div>
+</div>
 
-        <!-- Settings Modal -->
-        <div id="settings-modal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>Settings</h2>
-                    <span class="close-button" id="close-settings">&times;</span>
-                </div>
-                <div class="modal-body">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="close-to-tray-checkbox" data-setting="close-to-tray" />
-                        <label for="close-to-tray-checkbox">Close to Tray</label>
-                    </div>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="open-on-start-checkbox" />
-                        <label for="open-on-start-checkbox">Open on System Start</label>
-                    </div>
-                    <!-- Sub-option of "Open on System Start": only relevant while
-                         autostart is on, so it's shown indented and only when the
-                         parent toggle is checked. -->
-                    <div
-                        class="checkbox-group indented hidden"
-                        id="start-minimized-group"
-                    >
-                        <input
-                            type="checkbox"
-                            id="start-minimized-checkbox"
-                            data-setting="start-minimized"
-                        />
-                        <label for="start-minimized-checkbox"
-                            >Start Minimized to Tray</label
-                        >
-                    </div>
-                </div>
-            </div>
-        </div>
+<!-- ══ UPDATE MODAL ══════════════════════════════ -->
+<div id="update-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2><i class="fa-solid fa-arrow-up-from-bracket" style="margin-right:8px;font-size:11px;"></i>Update Available</h2>
+        <span class="close-button" id="close-update">&times;</span>
+    </div>
+    <div class="modal-body">
+        <p id="update-version-text"></p>
+        <pre id="update-notes-text"></pre>
+        <div id="update-modal-actions" class="close-confirm-actions">
+          <button id="update-later-btn">Later</button>
+          <button id="update-now-btn" class="primary">Update Now</button>
+      </div>
+  </div>
+</div>
+</div>
 
-        <!-- About Modal -->
-        <div id="about-modal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>About Watcher</h2>
-                    <span class="close-button" id="close-about">&times;</span>
-                </div>
-                <div class="modal-body">
-                    <p><strong>Version:</strong> 3.2.0</p>
-                    <p>
-                        <strong>Author:</strong>
-                        <a
-                            href="https://github.com/TacticalDeux"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            >TacticalDeux</a
-                        >
-                    </p>
-                    <p>
-                        <strong>Source Code:</strong>
-                        <a
-                            href="https://github.com/tacticaldeux/watcher"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            >tacticaldeux/watcher</a
-                        >
-                    </p>
-                    <p>A League of Legends automation tool.</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Update Available Modal: shown when "Check for Updates" finds a new release. -->
-        <div id="update-modal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>Update Available</h2>
-                    <span class="close-button" id="close-update">&times;</span>
-                </div>
-                <div class="modal-body">
-                    <p id="update-version-text"></p>
-                    <pre id="update-notes-text"></pre>
-                    <div id="update-modal-actions" class="close-confirm-actions">
-                        <button id="update-later-btn">Later</button>
-                        <button id="update-now-btn" class="primary">Update Now</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <script src="preload.js"></script>
-        <script src="renderer.js"></script>
-    </body>
+<script src="./preload.js"></script>
+<script src="./renderer.js"></script>
+</body>
 </html>

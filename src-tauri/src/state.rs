@@ -308,7 +308,9 @@ async fn load_summoner_spells_data() -> Result<SummonerSpellsData, String> {
     let mut name_index = HashMap::new();
 
     for spell in &spells {
-        name_index.insert(spell.name.clone(), spell.clone());
+        // Key by the lowercased name: `update_selected_spell` looks the spell up
+        // with `.to_lowercase()`, so the index must match that casing to resolve.
+        name_index.insert(spell.name.to_lowercase(), spell.clone());
     }
 
     Ok(SummonerSpellsData {

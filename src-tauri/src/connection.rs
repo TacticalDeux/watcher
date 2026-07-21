@@ -216,8 +216,8 @@ impl ConnectionManager {
                     update_game_state(|state| {
                         state.is_league_running = is_league_running;
                         if !is_league_running {
-                            state.connection_status = "League Client not running".to_string();
-                            state.gameflow_status = "Waiting for League Client...".to_string();
+                            state.connection_status = "League not running".to_string();
+                            state.gameflow_status = "Waiting for League...".to_string();
                             state.assigned_role = "".to_string();
                         }
                     })
@@ -595,8 +595,8 @@ impl ConnectionManager {
         {
             let mut game_state = get_app_state().get_game_state_mut().await;
             game_state.is_league_running = false;
-            game_state.connection_status = "League Client not running".to_string();
-            game_state.gameflow_status = "Waiting for League Client...".to_string();
+            game_state.connection_status = "League not running".to_string();
+            game_state.gameflow_status = "Waiting for League...".to_string();
             game_state.assigned_role = "".to_string();
         }
 
