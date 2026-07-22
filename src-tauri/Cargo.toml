@@ -32,6 +32,16 @@ bytes = { version = "1.0", optional = true }
 tauri-plugin-shell = "2"
 tauri-plugin-autostart = "2"
 
+# Win32 window inspection used by the "Dock to League Client" overlay feature:
+# finding the League client's window by process ID and reading its rect/state.
+# 0.59 is already compiled transitively (tauri pulls windows-sys), so this adds
+# no new download.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

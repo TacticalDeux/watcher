@@ -101,7 +101,7 @@ body {
 #app-brand {
   position: absolute;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(-50%) translateY(1px);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -145,18 +145,25 @@ body {
 }
 #theme-toggle { padding: 4px 8px; }
 
-/* Update button (hidden by default; shown when an update is available) */
+/* Update button — sits above the footer, right-aligned */
 #update-button {
-  background: var(--gold-dim) !important;
-  color: var(--gold-light) !important;
-  border: 1px solid var(--gold-primary) !important;
-  border-radius: var(--radius-sm) !important;
-  font-size: 11px !important;
-  padding: 3px 10px !important;
+  display: block;
+  margin-left: auto;
+  margin-right: 8px;
+  margin-bottom: -1px;
+  background: var(--gold-dim);
+  color: var(--gold-light);
+  border: 1px solid var(--gold-primary);
+  border-bottom: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  font-size: 10px;
+  padding: 2px 7px;
+  cursor: pointer;
+  white-space: nowrap;
 }
 #update-button:hover {
-  background: var(--gold-primary) !important;
-  color: #000 !important;
+  background: var(--gold-primary);
+  color: #000;
 }
 .hidden { display: none !important; }
 
@@ -972,4 +979,173 @@ body.light .modal-header {
 }
 body.light .modal-content {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25), 0 0 0 1px var(--gold-dim);
+}
+
+/* ── Docker-mode compact layout (220px panel) ──────── */
+body.docker-mode {
+  font-size: clamp(12px, 1.7vh, 14px);
+}
+
+/* Slimmer title bar, hide the "WATCHER" brand text */
+body.docker-mode #top-panel {
+  height: clamp(26px, 3.5vh, 32px);
+  padding: 0 4px;
+}
+body.docker-mode #app-brand .brand-name { display: none; }
+body.docker-mode #app-brand .brand-icon {
+  font-size: 0.9em;
+  transform: translateY(0);
+}
+body.docker-mode #top-panel button,
+body.docker-mode .dropbtn {
+  font-size: 0.9em;
+  padding: 2px 5px;
+}
+body.docker-mode #theme-toggle { padding: 3px 6px; }
+
+/* Tighter main scroll area */
+body.docker-mode #main-content {
+  padding: 4px 4px 0;
+}
+body.docker-mode #content-panel {
+  gap: 3px;
+}
+
+/* Collapse-section header */
+body.docker-mode .section-header {
+  padding: 3px 6px;
+}
+body.docker-mode .section-icon {
+  width: 1em;
+  height: 1em;
+  font-size: 0.55em;
+}
+body.docker-mode .section-title {
+  font-size: 0.85em;
+  letter-spacing: 0.5px;
+}
+body.docker-mode .section-title-group {
+  gap: 6px;
+}
+body.docker-mode .section-header > i {
+  font-size: 0.75em;
+}
+
+/* Tighter section-content pad */
+body.docker-mode .section-content {
+  padding: 4px 6px;
+  gap: 4px;
+}
+
+/* Compact status cards */
+body.docker-mode .status-card {
+  padding: 3px 6px;
+  min-width: 60px;
+}
+body.docker-mode .status-card-label {
+  font-size: 0.75em;
+}
+body.docker-mode .status-card-value {
+  font-size: 0.95em;
+}
+
+/* Compact toggle rows */
+body.docker-mode .toggle-row {
+  padding: 3px 6px;
+  gap: 4px;
+}
+body.docker-mode .toggle-label {
+  font-size: 0.95em;
+}
+body.docker-mode .toggle-desc {
+  font-size: 0.75em;
+}
+body.docker-mode .toggle-switch {
+  width: 24px;
+  height: 14px;
+  border-radius: 7px;
+}
+body.docker-mode .toggle-switch::after {
+  width: 9px;
+  height: 9px;
+  top: 1.5px;
+  left: 1.5px;
+}
+body.docker-mode input[type="checkbox"]:checked + .toggle-switch::after {
+  transform: translateX(10px);
+}
+
+/* Spell selection — stack vertically, shrink icons/selects */
+body.docker-mode .spell-selection-container {
+  flex-direction: column;
+  padding: 4px 6px;
+  gap: 3px;
+}
+body.docker-mode .spell-group {
+  gap: 4px;
+}
+body.docker-mode .spell-group img {
+  width: 1.8em;
+  height: 1.8em;
+}
+body.docker-mode .spell-group select {
+  font-size: 0.95em;
+  padding: 2px 3px;
+}
+body.docker-mode .spell-separator {
+  display: none;
+}
+
+/* Pick/ban compact */
+body.docker-mode #pick-ban-section.expanded {
+  padding: 4px 6px;
+}
+body.docker-mode #pick-ban-section h3 {
+  font-size: 0.9em;
+  padding-bottom: 4px;
+}
+body.docker-mode .autocomplete-container input[type="text"] {
+  font-size: 0.9em;
+  padding: 3px 5px;
+}
+body.docker-mode .champion-item {
+  font-size: 0.9em;
+  padding: 2px 3px 2px 6px;
+  gap: 4px;
+}
+body.docker-mode .champion-info { font-size: 0.9em; }
+
+/* Footer single-line compact */
+body.docker-mode .status-footer {
+  padding: 2px 6px;
+}
+body.docker-mode .status-footer p {
+  font-size: 0.85em;
+}
+body.docker-mode .left-status,
+body.docker-mode .right-status {
+  gap: 6px;
+}
+body.docker-mode #update-button {
+  font-size: 0.8em;
+  padding: 1px 6px;
+  margin-right: 4px;
+}
+body.docker-mode #test-update-button {
+  font-size: 0.8em;
+}
+
+/* Warnings / labels */
+body.docker-mode .warning-label {
+  font-size: 9px;
+}
+body.docker-mode .info-label {
+  font-size: 9px;
+}
+
+/* Modals don't need to auto-shrink; they overlay, so they keep their fixed
+   width. But the settings-modal content needs to fit inside a 220px panel
+   when the modal is open while docked. */
+body.docker-mode .modal-content {
+  width: 290px;
 }

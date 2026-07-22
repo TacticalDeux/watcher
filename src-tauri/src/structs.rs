@@ -51,6 +51,12 @@ pub struct Settings {
     /// the user hasn't chosen yet.
     #[serde(rename = "startMinimized", default, skip_serializing_if = "Option::is_none")]
     pub start_minimized: Option<bool>,
+    /// "Dock to League Client" mode: when on, Watcher docks itself to the left
+    /// edge of the League client window, hides its taskbar icon, stays
+    /// always-on-top, and follows the client on move/resize, matching the
+    /// client's height. `None` means the user hasn't chosen yet (defaults off).
+    #[serde(rename = "dockerMode", default, skip_serializing_if = "Option::is_none")]
+    pub docker_mode: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

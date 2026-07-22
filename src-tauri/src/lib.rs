@@ -1,6 +1,7 @@
 mod commands;
 mod connection;
 mod constants;
+mod docker;
 mod events;
 mod state;
 mod structs;
@@ -191,6 +192,7 @@ pub fn run() {
             let (event_tx, _event_rx) = mpsc::channel::<ConnectionEvent>(32);
             let connection_manager = ConnectionManager::new(event_tx);
             app.manage(connection_manager);
+            app.manage(docker::DockerState::default());
 
             let app_handle = app.app_handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -215,8 +217,16 @@ pub fn run() {
 
                 // Restore persisted settings (close-to-tray, toggles, picks/bans).
                 if let Some(saved) = load_persisted_settings() {
+                    let want_docker = saved.docker_mode == Some(true);
                     let mut game_state = get_app_state().get_game_state_mut().await;
                     game_state.settings = saved;
+                    drop(game_state);
+                    // "Dock to League Client" restored on: spawn the tracker so it
+                    // docks as soon as the League client window appears. Harmless
+                    // when the client isn't running yet (the tracker stays hidden).
+                    if want_docker {
+                        docker::enable_docker(&app_handle);
+                    }
                 }
 
                 let game_state = get_app_state().get_game_state().await;
@@ -277,7 +287,9 @@ pub fn run() {
             run_updater,
             frontend_ready,
             get_autostart_state,
-            toggle_autostart
+            toggle_autostart,
+            #[cfg(debug_assertions)]
+            test_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

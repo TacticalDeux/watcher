@@ -14,15 +14,18 @@
     <div class="top-panel-group">
       <div class="dropdown">
         <button class="dropbtn" id="file-menu-button">
-          <i class="fa-solid fa-bars" style="font-size:11px; margin-right:5px;"></i>File
+          <i class="fa-solid fa-bars" style="font-size:11px;"></i>
       </button>
       <div class="dropdown-content" id="file-dropdown-content">
+          <a href="#" id="dock-button"><i class="fa-solid fa-link"></i> Dock</a>
           <a href="#" id="hide-app-button"><i class="fa-solid fa-eye-slash"></i> Hide App</a>
-          <a href="#" id="settings-button"><i class="fa-solid fa-gear"></i> Settings</a>
       </div>
   </div>
-  <button id="update-button" class="hidden">
-    <i class="fa-solid fa-arrow-up"></i> Update
+  <button id="settings-button" title="Settings">
+    <i class="fa-solid fa-gear" style="font-size:11px;"></i>
+</button>
+<button id="test-update-button" title="Test Update (Dev)">
+    <i class="fa-solid fa-flask"></i>
 </button>
 </div>
 
@@ -166,6 +169,10 @@
 </div><!-- /content-panel -->
 </div><!-- /main-content -->
 
+<button id="update-button" class="hidden">
+  <i class="fa-solid fa-arrow-up"></i> Update
+</button>
+
 <!-- ══ STATUS FOOTER ══════════════════════════════ -->
 <div class="status-footer">
     <div class="left-status">
@@ -174,6 +181,7 @@
   <div class="right-status">
       <p id="update-status">Program is up to date.</p>
       <p style="color:var(--gold-dim);">v3.2.0</p>
+    </div>
   </div>
 </div>
 
@@ -207,7 +215,16 @@
         <input type="checkbox" id="close-to-tray-checkbox" data-setting="close-to-tray" />
         <label class="toggle-switch" for="close-to-tray-checkbox"></label>
     </div>
-    <div class="toggle-row">
+    <!-- Docker mode: docks Watcher to the left edge of the League client -->
+    <div class="toggle-row" id="docker-mode-row">
+      <div class="toggle-label-wrap">
+        <label class="toggle-label" for="docker-mode-checkbox">Dock on Startup</label>
+        <span class="toggle-desc">Launch docked to the League client</span>
+    </div>
+    <input type="checkbox" id="docker-mode-checkbox" data-setting="docker-mode" />
+    <label class="toggle-switch" for="docker-mode-checkbox"></label>
+</div>
+<div class="toggle-row">
       <div class="toggle-label-wrap">
         <label class="toggle-label" for="open-on-start-checkbox">Open on System Start</label>
         <span class="toggle-desc">Launch Watcher automatically at login</span>

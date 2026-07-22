@@ -2,7 +2,7 @@ use crate::state::{get_app_state, get_champions_data, get_summoner_spells_data};
 use crate::structs::{GameState, Settings};
 use crate::ui::update_ui;
 use crate::updater;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_autostart::ManagerExt;
 
 #[tauri::command]
@@ -68,6 +68,7 @@ pub async fn get_current_game_state() -> Result<GameState, String> {
             champion_ban: game_state.settings.champion_ban.clone(),
             close_to_tray: game_state.settings.close_to_tray,
             start_minimized: game_state.settings.start_minimized,
+            docker_mode: game_state.settings.docker_mode,
         },
     })
 }
@@ -111,6 +112,9 @@ pub async fn update_checkbox(
             "start-minimized" => {
                 game_state.settings.start_minimized = Some(checked);
             }
+            "docker-mode" => {
+                game_state.settings.docker_mode = Some(checked);
+            }
             _ => return Err(format!("Unknown checkbox ID: {}", id)),
         }
     }
@@ -124,6 +128,16 @@ pub async fn update_checkbox(
         let manager = app_handle.autolaunch();
         if manager.is_enabled().unwrap_or(false) {
             let _ = manager.enable();
+        }
+    }
+    // "Dock to League Client" reacts immediately to its toggle: start the
+    // Win32 tracking loop on enable, or stop it + restore the standalone
+    // window on disable. No-op on non-Windows hosts.
+    if id == "docker-mode" {
+        if checked {
+            crate::docker::enable_docker(&app_handle);
+        } else {
+            crate::docker::disable_docker(&app_handle);
         }
     }
     let game_state = get_app_state().get_game_state().await;
@@ -253,5 +267,19 @@ pub async fn remove_champion_ban(app_handle: AppHandle) -> Result<(), String> {
     }
     let game_state = get_app_state().get_game_state().await;
     update_ui(&app_handle, &game_state).await;
+    Ok(())
+}
+
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn test_update(app_handle: AppHandle) -> Result<(), String> {
+    let _ = app_handle.emit(
+        "update-available",
+        serde_json::json!({
+            "version": "9.9.9",
+            "notes": "Test update.\n- Mock change 1\n- Mock change 2",
+            "url": "https://example.com/test-update.exe"
+        }),
+    );
     Ok(())
 }

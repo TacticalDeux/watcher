@@ -3,6 +3,7 @@ document.addEventListener("DOMContentLoaded", () => {
     fileMenuButton: document.getElementById("file-menu-button"),
     fileDropdownContent: document.getElementById("file-dropdown-content"),
     hideAppButton: document.getElementById("hide-app-button"),
+    dockButton: document.getElementById("dock-button"),
     clearPicksBansButton: document.getElementById("clear-picks-bans"),
     settingsSection: document.getElementById("settings-section"),
     pickTextInput: document.getElementById("pick-text-input"),
@@ -17,6 +18,7 @@ document.addEventListener("DOMContentLoaded", () => {
     themeToggleButton: document.getElementById("theme-toggle"),
     themeIcon: document.getElementById("theme-icon"),
     updateButton: document.getElementById("update-button"),
+    testUpdateButton: document.getElementById("test-update-button"),
     updateStatus: document.getElementById("update-status"),
     pickBanSection: document.getElementById("pick-ban-section"),
     pickSuggestions: document.getElementById("pick-suggestions"),
@@ -37,6 +39,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   elements.updateButton.classList.add("hidden");
+  elements.testUpdateButton.onclick = () => {
+    window.tauriAPI.send("test_update");
+  };
 
   let champions = [];
   let summonerSpells = [];
@@ -372,6 +377,10 @@ document.addEventListener("DOMContentLoaded", () => {
               ctt.checked = data.settings.closeToTray;
               ctt.dataset.initialized = "true";
             }
+          const dcm = document.getElementById("docker-mode-checkbox");
+          if (data.settings.dockerMode != null) dcm.checked = data.settings.dockerMode;
+          document.body.classList.toggle("docker-mode", dcm.checked);
+          updateDockMenuButton(dcm.checked);
 
           // Ensure pick/ban section visibility stays in sync with the setting.
           setPickBanExpanded(data.settings.pickBanSelection);
@@ -379,6 +388,18 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
     });
+  }
+
+  function updateDockMenuButton(docked) {
+    const dockBtn = document.getElementById("dock-button");
+    const hideBtn = document.getElementById("hide-app-button");
+    if (docked) {
+      dockBtn.style.display = "none";
+      hideBtn.innerHTML = '<i class="fa-solid fa-link-slash"></i> Undock';
+    } else {
+      dockBtn.style.display = "";
+      hideBtn.innerHTML = '<i class="fa-solid fa-eye-slash"></i> Hide App';
+    }
   }
 
   async function fetchAndInitializeData() {
@@ -435,6 +456,10 @@ document.addEventListener("DOMContentLoaded", () => {
           ctt.checked = gameState.settings.closeToTray;
           ctt.dataset.initialized = "true";
         }
+        const dcm = document.getElementById("docker-mode-checkbox");
+        if (gameState.settings.dockerMode != null) dcm.checked = gameState.settings.dockerMode;
+        document.body.classList.toggle("docker-mode", dcm.checked);
+        updateDockMenuButton(dcm.checked);
 
         // Initialize autostart checkbox state from registry
         try {
@@ -523,11 +548,12 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateAssignedRole(role) {
+    const card = elements.assignedRole.closest(".status-card");
     if (role) {
       elements.assignedRole.textContent = `Role: ${role}`;
-      elements.assignedRole.style.display = "block";
+      if (card) card.style.display = "";
     } else {
-      elements.assignedRole.style.display = "none";
+      if (card) card.style.display = "none";
     }
   }
 
@@ -566,7 +592,29 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.hideAppButton.addEventListener(
       "click",
       () => {
-        window.tauriAPI.send("hide_app");
+        const docked = document.getElementById("docker-mode-checkbox").checked;
+        if (docked) {
+          document.getElementById("docker-mode-checkbox").checked = false;
+          window.tauriAPI.send("update_checkbox", {
+            id: "docker-mode",
+            checked: false,
+          });
+        } else {
+          window.tauriAPI.send("hide_app");
+        }
+        elements.fileDropdownContent.classList.remove("show");
+      },
+      { passive: true },
+    );
+
+    elements.dockButton.addEventListener(
+      "click",
+      () => {
+        document.getElementById("docker-mode-checkbox").checked = true;
+        window.tauriAPI.send("update_checkbox", {
+          id: "docker-mode",
+          checked: true,
+        });
         elements.fileDropdownContent.classList.remove("show");
       },
       { passive: true },
@@ -1412,6 +1460,14 @@ document.addEventListener("DOMContentLoaded", () => {
       event.target.dataset.initialized = "true";
       window.tauriAPI.send("update_checkbox", {
         id: "close-to-tray",
+        checked: event.target.checked,
+      });
+    });
+
+    // Dock to League Client toggle — persists via the backend.
+    document.getElementById("docker-mode-checkbox").addEventListener("change", (event) => {
+      window.tauriAPI.send("update_checkbox", {
+        id: "docker-mode",
         checked: event.target.checked,
       });
     });
