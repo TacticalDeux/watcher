@@ -39,6 +39,14 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   elements.updateButton.classList.add("hidden");
+
+  // Test update button — only show in dev builds (command is #[cfg(debug_assertions)] gated)
+  window.tauriAPI.send("test_update").then(() => {
+    elements.testUpdateButton.classList.remove("hidden");
+  }).catch(() => {
+    // Command not found = release build, keep button hidden
+  });
+
   elements.testUpdateButton.onclick = () => {
     window.tauriAPI.send("test_update");
   };

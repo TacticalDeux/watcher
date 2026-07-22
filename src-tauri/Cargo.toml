@@ -1,6 +1,6 @@
 [package]
 name = "watcher"
-version = "3.2.0"
+version = "3.3.0"
 description = "A League of Legends Champion Select Automation Tool"
 authors = ["TacticalDeux <tacticaldeux1@gmail.com>"]
 license = "MIT"
