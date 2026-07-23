@@ -57,6 +57,17 @@ pub struct Settings {
     /// client's height. `None` means the user hasn't chosen yet (defaults off).
     #[serde(rename = "dockerMode", default, skip_serializing_if = "Option::is_none")]
     pub docker_mode: Option<bool>,
+    /// Sub-setting of Docker mode: when on, closing the League client restores
+    /// Watcher to its normal standalone window (decorations, taskbar icon, no
+    /// always-on-top) instead of hiding it until League reappears. Only
+    /// visible while Docker mode is enabled. `None` means not yet chosen
+    /// (defaults to hiding, the original behaviour).
+    #[serde(
+        rename = "dockerStandaloneWhenClosed",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub docker_standalone_when_closed: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

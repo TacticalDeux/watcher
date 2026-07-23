@@ -181,7 +181,7 @@
   </div>
   <div class="right-status">
       <p id="update-status">Program is up to date.</p>
-      <p style="color:var(--gold-dim);">v3.3.0</p>
+      <p style="color:var(--gold-dim);">v3.3.1</p>
     </div>
   </div>
 </div>
@@ -225,6 +225,15 @@
     <input type="checkbox" id="docker-mode-checkbox" data-setting="docker-mode" />
     <label class="toggle-switch" for="docker-mode-checkbox"></label>
 </div>
+<!-- Sub-setting: only visible when Docker mode is on -->
+<div class="toggle-row indented hidden" id="docker-standalone-group">
+  <div class="toggle-label-wrap">
+    <label class="toggle-label" for="docker-standalone-checkbox">Show When League Is Closed</label>
+    <span class="toggle-desc">Return to normal window instead of hiding</span>
+  </div>
+  <input type="checkbox" id="docker-standalone-checkbox" data-setting="docker-standalone-when-closed" />
+  <label class="toggle-switch" for="docker-standalone-checkbox"></label>
+</div>
 <div class="toggle-row">
       <div class="toggle-label-wrap">
         <label class="toggle-label" for="open-on-start-checkbox">Open on System Start</label>
@@ -261,7 +270,7 @@
             <div style="font-size:11px;color:var(--text-muted);">League of Legends Automation Tool</div>
         </div>
     </div>
-    <p><strong>Version:</strong> 3.3.0</p>
+    <p><strong>Version:</strong> 3.3.1</p>
     <p><strong>Author:</strong> <a href="https://github.com/TacticalDeux" target="_blank" rel="noopener noreferrer">TacticalDeux</a></p>
     <p><strong>Source Code:</strong> <a href="https://github.com/tacticaldeux/watcher" target="_blank" rel="noopener noreferrer">tacticaldeux/watcher</a></p>
 </div>

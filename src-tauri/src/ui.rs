@@ -1,5 +1,6 @@
 use crate::state::{get_app_state, persist_settings};
 use crate::structs::{GameState, Settings, TraySettings};
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::{AppHandle, Emitter, Manager};
 
 pub fn show_app(app_handle: tauri::AppHandle) {
@@ -163,4 +164,50 @@ pub async fn update_tray_tooltip_internal(
     if let Some(tray) = app_handle.tray_by_id("main") {
         let _ = tray.set_tooltip(Some(&tooltip));
     }
+}
+
+/// Rebuild the tray menu so the Dock/Undock item reflects the current docked
+/// state. Called from `docker::enable_docker` (→ "Undock from League") and
+/// `docker::disable_docker` (→ "Dock to League"), and also from the tray menu
+/// handler itself after toggling.
+pub fn update_tray_dock_menu(app_handle: &AppHandle, docked: bool) {
+    let Some(tray) = app_handle.tray_by_id("main") else {
+        return;
+    };
+    let label = if docked {
+        "Undock from League"
+    } else {
+        "Dock to League"
+    };
+    let Ok(show) = MenuItemBuilder::with_id("show", "Show App").build(app_handle) else {
+        return;
+    };
+    let Ok(hide) = MenuItemBuilder::with_id("hide", "Hide App").build(app_handle) else {
+        return;
+    };
+    let Ok(toggle_dock) = MenuItemBuilder::with_id("toggle_dock", label).build(app_handle) else {
+        return;
+    };
+    let Ok(check_for_updates) =
+        MenuItemBuilder::with_id("check_for_updates", "Check for Updates").build(app_handle)
+    else {
+        return;
+    };
+    let Ok(quit) = MenuItemBuilder::with_id("quit", "Quit").build(app_handle) else {
+        return;
+    };
+    let Ok(menu) = MenuBuilder::new(app_handle)
+        .item(&show)
+        .item(&hide)
+        .separator()
+        .item(&toggle_dock)
+        .separator()
+        .item(&check_for_updates)
+        .separator()
+        .item(&quit)
+        .build()
+    else {
+        return;
+    };
+    let _ = tray.set_menu(Some(menu));
 }

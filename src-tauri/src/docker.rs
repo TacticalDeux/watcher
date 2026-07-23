@@ -32,8 +32,9 @@ mod ffi {
     use tauri::{Manager, PhysicalPosition, PhysicalSize};
     use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic,
-        IsWindow, IsWindowVisible,
+        EnumWindows, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId,
+        GW_HWNDPREV, GWL_EXSTYLE, HWND_TOP, IsIconic, IsWindow, IsWindowVisible, SetWindowPos,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_TOPMOST,
     };
 
     /// A snapshot of the League client's window: its HWND (as a Send-safe
@@ -76,6 +77,65 @@ mod ffi {
                 bottom: rect.bottom,
                 minimized: IsIconic(hwnd) != 0,
             })
+        }
+    }
+
+    /// Check whether a window has the `WS_EX_TOPMOST` extended style. A
+    /// top-most window stays visually above all non-topmost windows even when
+    /// it loses focus — this is League's "bring itself up on top of all other
+    /// apps" behavior.
+    fn is_topmost(hwnd: HWND) -> bool {
+        unsafe { (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32) & WS_EX_TOPMOST != 0 }
+    }
+
+    /// Pin our panel to one z-order step above the League client so both
+    /// windows stay together even when another app partially covers League.
+    ///
+    /// When League has WS_EX_TOPMOST set the panel enters the topmost band
+    /// alongside it; otherwise it stays in the normal z-order band, one slot
+    /// above League. Only affects z-order — position/size are unchanged
+    /// (`SWP_NOMOVE | SWP_NOSIZE`) and the panel never steals focus
+    /// (`SWP_NOACTIVATE`).
+    fn pin_zorder_above(
+        watcher_hwnd_val: Option<usize>,
+        league_hwnd: HWND,
+        league_topmost: bool,
+    ) {
+        let Some(watcher_hwnd) = watcher_hwnd_val else {
+            return;
+        };
+        let watcher = watcher_hwnd as HWND;
+        // Safety: both HWNDs are real window handles obtained from our own
+        // window (Tauri hwnd()) and EnumWindows. All four Win32 calls are
+        // read-only queries or a z-order-only SetWindowPos.
+        unsafe {
+            if league_topmost {
+                // League is in the topmost band — lift the panel there too
+                // so relative z-ordering works within the same band.
+                SetWindowPos(
+                    watcher,
+                    HWND_TOP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                );
+            } else {
+                // Normal band: find the window directly above League and
+                // insert the panel right below it (→ right above League).
+                let above = GetWindow(league_hwnd, GW_HWNDPREV);
+                let insert_after = if above.is_null() { HWND_TOP } else { above };
+                SetWindowPos(
+                    watcher,
+                    insert_after,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                );
+            }
         }
     }
 
@@ -184,7 +244,8 @@ mod ffi {
     fn apply_docked_props(window: &tauri::WebviewWindow) {
         let _ = window.set_decorations(false);
         let _ = window.set_resizable(false);
-        let _ = window.set_always_on_top(true);
+        // Z-order is managed per-tick by pin_zorder_above so Watcher sits
+        // exactly one level above the League client in its z-order band.
         let _ = window.set_skip_taskbar(true);
         // Relax the build-time min height (600) so the docked panel can shrink to
         // follow a short client; keep the width fixed.
@@ -221,6 +282,7 @@ mod ffi {
         };
 
         apply_docked_props(&window);
+        crate::update_tray_dock_menu(app_handle, true);
 
         // Stop any prior tracker, then arm this one's stop flag.
         let stop = Arc::new(AtomicBool::new(false));
@@ -254,6 +316,7 @@ mod ffi {
             let mut tick_ms = FAST_TICK_MS;
             let mut stable_ticks: u32 = 0;
             let mut last_rect: (i32, i32, i32) = (0, 0, 0);
+            let mut in_standalone_fallback = false;
 
             loop {
                 if stop.load(Ordering::Relaxed) {
@@ -262,19 +325,51 @@ mod ffi {
                 tokio::time::sleep(Duration::from_millis(tick_ms)).await;
 
                 // Read state under a short-lived guard; drop it before blocking.
-                let (docker_on, league_running) = {
+                let (docker_on, league_running, standalone_when_closed) = {
                     let gs = crate::get_app_state().get_game_state().await;
-                    (gs.settings.docker_mode == Some(true), gs.is_league_running)
+                    (
+                        gs.settings.docker_mode == Some(true),
+                        gs.is_league_running,
+                        gs.settings.docker_standalone_when_closed == Some(true),
+                    )
                 };
                 if !docker_on {
                     return;
                 }
                 if !league_running {
-                    let _ = window.hide();
+                    if standalone_when_closed {
+                        // Restore standalone window props so the user can
+                        // interact with Watcher normally while League is
+                        // absent. Only do this on the first tick after League
+                        // disappears — subsequent ticks leave the window alone.
+                        if !in_standalone_fallback {
+                            restore_standalone_props(&window);
+                            let state = window
+                                .app_handle()
+                                .state::<super::DockerState>();
+                            if let Ok(guard) = state.saved_rect.lock() {
+                                if let Some((x, y, w, h)) = *guard {
+                                    let _ = window.set_size(PhysicalSize::new(w, h));
+                                    let _ = window.set_position(PhysicalPosition::new(x, y));
+                                }
+                            }
+                            let _ = window.show();
+                            in_standalone_fallback = true;
+                        }
+                    } else {
+                        let _ = window.hide();
+                    }
                     cached_hwnd = None;
                     stable_ticks = 0;
                     tick_ms = FAST_TICK_MS;
                     continue;
+                }
+
+                // Re-apply docked props if we were in standalone fallback and
+                // League has just reappeared.
+                if in_standalone_fallback {
+                    apply_docked_props(&window);
+                    in_standalone_fallback = false;
                 }
 
                 // Time-based throttle for the heavy PID lookup.
@@ -303,14 +398,11 @@ mod ffi {
                     continue;
                 }
 
-                // Hide only when neither League nor the docked panel itself is
-                // the foreground window.
-                let fg = unsafe { GetForegroundWindow() } as usize;
-                let has_focus = fg == lw.hwnd || watcher_hwnd == Some(fg);
-                if !has_focus {
-                    let _ = window.hide();
-                    continue;
-                }
+                // League is visible (not minimized). The panel rides along with it
+                // regardless of which app has the foreground — closing the League
+                // client (see the !league_running branch) and minimizing it are
+                // the only hide conditions now.
+                let league_topmost = is_topmost(lw.hwnd as HWND);
 
                 // Detect movement. If the rect changed, we're being dragged →
                 // fast polling. If stable for N fast ticks, drop to slow.
@@ -336,6 +428,13 @@ mod ffi {
                 if !window.is_visible().unwrap_or(false) {
                     let _ = window.show();
                 }
+
+                // Pin the panel one z-order step above the League client LAST,
+                // after set_size/set_position/show (which each issue their own
+                // SetWindowPos and would otherwise reset the z-order). This keeps
+                // Watcher glued to the client's z-depth even when another app
+                // partially covers League — no focus check, no always-on-top.
+                pin_zorder_above(watcher_hwnd, lw.hwnd as HWND, league_topmost);
             }
         });
     }
@@ -374,6 +473,7 @@ mod ffi {
             }
         }
         let _ = window.show();
+        crate::update_tray_dock_menu(app_handle, false);
     }
 }
 

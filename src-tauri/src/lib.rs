@@ -55,9 +55,12 @@ pub fn run() {
             let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
             let hide = MenuItemBuilder::with_id("hide", "Hide App").build(app)?;
             let show = MenuItemBuilder::with_id("show", "Show App").build(app)?;
+            let toggle_dock = MenuItemBuilder::with_id("toggle_dock", "Dock to League").build(app)?;
             let tray_menu = MenuBuilder::new(app)
                 .item(&show)
                 .item(&hide)
+                .separator()
+                .item(&toggle_dock)
                 .separator()
                 .item(&check_for_updates)
                 .separator()
@@ -91,6 +94,32 @@ pub fn run() {
                                 {
                                     eprintln!("Update check failed: {}", e);
                                 }
+                            });
+                        }
+                        "toggle_dock" => {
+                            let app_handle = app_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let docked = {
+                                    get_app_state()
+                                        .get_game_state()
+                                        .await
+                                        .settings
+                                        .docker_mode
+                                        == Some(true)
+                                };
+                                {
+                                    let mut gs = get_app_state()
+                                        .get_game_state_mut()
+                                        .await;
+                                    gs.settings.docker_mode = Some(!docked);
+                                }
+                                if docked {
+                                    crate::docker::disable_docker(&app_handle);
+                                } else {
+                                    crate::docker::enable_docker(&app_handle);
+                                }
+                                let gs = get_app_state().get_game_state().await;
+                                update_ui(&app_handle, &gs).await;
                             });
                         }
                         _ => {}

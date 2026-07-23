@@ -389,6 +389,12 @@ document.addEventListener("DOMContentLoaded", () => {
           if (data.settings.dockerMode != null) dcm.checked = data.settings.dockerMode;
           document.body.classList.toggle("docker-mode", dcm.checked);
           updateDockMenuButton(dcm.checked);
+          updateDockerStandaloneVisibility(dcm.checked);
+          const dsc = document.getElementById("docker-standalone-checkbox");
+          if (data.settings.dockerStandaloneWhenClosed != null) {
+            dsc.checked = data.settings.dockerStandaloneWhenClosed;
+            dsc.dataset.initialized = "true";
+          }
 
           // Ensure pick/ban section visibility stays in sync with the setting.
           setPickBanExpanded(data.settings.pickBanSelection);
@@ -468,6 +474,12 @@ document.addEventListener("DOMContentLoaded", () => {
         if (gameState.settings.dockerMode != null) dcm.checked = gameState.settings.dockerMode;
         document.body.classList.toggle("docker-mode", dcm.checked);
         updateDockMenuButton(dcm.checked);
+        updateDockerStandaloneVisibility(dcm.checked);
+        const dsc = document.getElementById("docker-standalone-checkbox");
+        if (gameState.settings.dockerStandaloneWhenClosed != null) {
+          dsc.checked = gameState.settings.dockerStandaloneWhenClosed;
+          dsc.dataset.initialized = "true";
+        }
 
         // Initialize autostart checkbox state from registry
         try {
@@ -1445,6 +1457,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // "Show When League Is Closed" is a sub-option of "Dock on Startup" and is
+  // only shown while dock mode is enabled.
+  function updateDockerStandaloneVisibility(docked) {
+    const group = document.getElementById("docker-standalone-group");
+    if (group) {
+      group.classList.toggle("hidden", !docked);
+    }
+  }
+
   function setupSettingsModal() {
     const modal = document.getElementById("settings-modal");
     const closeButton = document.getElementById("close-settings");
@@ -1472,12 +1493,25 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
-    // Dock to League Client toggle — persists via the backend.
+    // Dock to League Client toggle — persists via the backend. The "Show When
+    // League Is Closed" sub-option only applies while dock mode is on.
     document.getElementById("docker-mode-checkbox").addEventListener("change", (event) => {
+      const checked = event.target.checked;
       window.tauriAPI.send("update_checkbox", {
         id: "docker-mode",
-        checked: event.target.checked,
+        checked,
       });
+      updateDockerStandaloneVisibility(checked);
+      if (!checked) {
+        const dsc = document.getElementById("docker-standalone-checkbox");
+        if (dsc && dsc.checked) {
+          dsc.checked = false;
+          window.tauriAPI.send("update_checkbox", {
+            id: "docker-standalone-when-closed",
+            checked: false,
+          });
+        }
+      }
     });
 
     // Open on system start toggle
@@ -1509,6 +1543,14 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("start-minimized-checkbox").addEventListener("change", (event) => {
       window.tauriAPI.send("update_checkbox", {
         id: "start-minimized",
+        checked: event.target.checked,
+      });
+    });
+
+    // "Show When League Is Closed" sub-option of Docker mode.
+    document.getElementById("docker-standalone-checkbox").addEventListener("change", (event) => {
+      window.tauriAPI.send("update_checkbox", {
+        id: "docker-standalone-when-closed",
         checked: event.target.checked,
       });
     });

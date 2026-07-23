@@ -69,6 +69,7 @@ pub async fn get_current_game_state() -> Result<GameState, String> {
             close_to_tray: game_state.settings.close_to_tray,
             start_minimized: game_state.settings.start_minimized,
             docker_mode: game_state.settings.docker_mode,
+            docker_standalone_when_closed: game_state.settings.docker_standalone_when_closed,
         },
     })
 }
@@ -114,6 +115,9 @@ pub async fn update_checkbox(
             }
             "docker-mode" => {
                 game_state.settings.docker_mode = Some(checked);
+            }
+            "docker-standalone-when-closed" => {
+                game_state.settings.docker_standalone_when_closed = Some(checked);
             }
             _ => return Err(format!("Unknown checkbox ID: {}", id)),
         }
